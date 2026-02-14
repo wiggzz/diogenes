@@ -76,6 +76,19 @@ class DynamoDBStateStore:
             ExpressionAttributeNames=names,
         )
 
+
+
+    def put_instance_if_absent(self, instance: dict) -> bool:
+        try:
+            self._instances.put_item(
+                Item=instance,
+                ConditionExpression="attribute_not_exists(instance_id)",
+            )
+            return True
+        except self._instances.meta.client.exceptions.ConditionalCheckFailedException:
+            return False
+
+
     # --- Models ---
 
     def get_model_config(self, model_name: str) -> dict | None:

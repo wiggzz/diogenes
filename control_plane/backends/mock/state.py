@@ -33,6 +33,13 @@ class InMemoryStateStore:
             raise KeyError(f"Instance {instance_id} not found")
         inst.update(fields)
 
+    def put_instance_if_absent(self, instance: dict) -> bool:
+        instance_id = instance["instance_id"]
+        if instance_id in self._instances:
+            return False
+        self._instances[instance_id] = instance
+        return True
+
     # --- Models ---
 
     def get_model_config(self, model_name: str) -> dict | None:

@@ -33,6 +33,10 @@ class StateStore(Protocol):
         """Update specific fields on an instance record."""
         ...
 
+    def put_instance_if_absent(self, instance: dict) -> bool:
+        """Create an instance record if its primary key does not already exist."""
+        ...
+
     # --- Models ---
 
     def get_model_config(self, model_name: str) -> dict | None:

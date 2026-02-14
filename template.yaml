@@ -1,0 +1,305 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Diogenes - Personal LLM backend that scales to zero
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  AllowedEmails:
+    Type: String
+    Default: ""
+    Description: Comma-separated list of allowed email addresses
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: Google OAuth Client ID
+  GpuAmiId:
+    Type: String
+    Default: ""
+    Description: AMI ID for GPU instances (with vLLM pre-installed)
+  GpuSubnetId:
+    Type: String
+    Default: ""
+    Description: Subnet ID for GPU instances
+  GpuSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group ID for GPU instances
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        INSTANCES_TABLE: !Ref InstancesTable
+        MODELS_TABLE: !Ref ModelsTable
+        API_KEYS_TABLE: !Ref ApiKeysTable
+        ALLOWED_EMAILS: !Ref AllowedEmails
+        GOOGLE_CLIENT_ID: !Ref GoogleClientId
+
+Resources:
+  # --- API Gateway ---
+  DiogenesApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+
+  # --- DynamoDB Tables ---
+  InstancesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub diogenes-instances-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: instance_id
+          AttributeType: S
+        - AttributeName: model
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: instance_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: model-status-index
+          KeySchema:
+            - AttributeName: model
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ModelsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub diogenes-models-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+
+  ApiKeysTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub diogenes-api-keys-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: key_hash
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key_hash
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # --- EventBridge (scale-down schedule) ---
+  ScaleDownSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt OrchestratorFunction.Arn
+          Id: ScaleDownTarget
+          Input: '{"source": "schedule", "action": "scale_down"}'
+
+  ScaleDownPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrchestratorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScaleDownSchedule.Arn
+
+  # --- GPU Instance IAM ---
+  GpuInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  GpuInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref GpuInstanceRole
+
+  # --- Lambda Functions ---
+  OrchestratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: control_plane.backends.aws.handlers.orchestrator_handler
+      CodeUri: control_plane/
+      Timeout: 900
+      MemorySize: 256
+      Environment:
+        Variables:
+          GPU_AMI_ID: !Ref GpuAmiId
+          GPU_SUBNET_ID: !Ref GpuSubnetId
+          GPU_SECURITY_GROUP_ID: !Ref GpuSecurityGroupId
+          GPU_INSTANCE_PROFILE_ARN: !GetAtt GpuInstanceProfile.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InstancesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ModelsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:RunInstances
+                - ec2:TerminateInstances
+                - ec2:DescribeInstances
+                - ec2:CreateTags
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt GpuInstanceRole.Arn
+
+  RouterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: control_plane.backends.aws.handlers.router_handler
+      CodeUri: control_plane/
+      Timeout: 30
+      Environment:
+        Variables:
+          ORCHESTRATOR_FUNCTION_NAME: !Ref OrchestratorFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InstancesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ModelsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref OrchestratorFunction
+      Events:
+        ChatCompletions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /v1/chat/completions
+            Method: POST
+        Completions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /v1/completions
+            Method: POST
+        Models:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /v1/models
+            Method: GET
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: control_plane.backends.aws.handlers.authorizer_handler
+      CodeUri: control_plane/
+      Timeout: 5
+      MemorySize: 128
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ApiKeysTable
+
+  KeysFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: control_plane.backends.aws.handlers.keys_handler
+      CodeUri: control_plane/
+      Timeout: 10
+      MemorySize: 128
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ApiKeysTable
+      Events:
+        CreateKey:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /api/keys
+            Method: POST
+        ListKeys:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /api/keys
+            Method: GET
+        DeleteKey:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /api/keys/{key_id}
+            Method: DELETE
+
+  ClusterStateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: control_plane.backends.aws.handlers.cluster_handler
+      CodeUri: control_plane/
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          ORCHESTRATOR_FUNCTION_NAME: !Ref OrchestratorFunction
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref InstancesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ModelsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref OrchestratorFunction
+      Events:
+        GetCluster:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /api/cluster
+            Method: GET
+        ScaleCluster:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DiogenesApi
+            Path: /api/cluster/scale
+            Method: POST
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway URL
+    Value: !Sub "https://${DiogenesApi}.execute-api.${AWS::Region}.amazonaws.com"
+  OrchestratorFunctionName:
+    Value: !Ref OrchestratorFunction

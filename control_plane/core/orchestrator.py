@@ -24,6 +24,9 @@ def scale_up(
 ) -> dict:
     """Launch a GPU instance for the given model (idempotent).
 
+    Uses optimistic write semantics on a single per-model placeholder row,
+    avoiding explicit acquire/release lock steps.
+
     Returns the instance record.
     """
     # Idempotency: skip if already starting or ready
@@ -33,39 +36,55 @@ def scale_up(
         logger.info("Instance already exists for %s: %s", model_name, existing[0]["instance_id"])
         return existing[0]
 
-    # Look up model config
     model_config = state.get_model_config(model_name)
     if model_config is None:
         raise ValueError(f"Unknown model: {model_name}")
 
-    # Launch instance
-    logger.info("Launching instance for model %s", model_name)
-    instance_id, ip = compute.launch(model_config)
-
-    instance = {
-        "instance_id": instance_id,
+    now = int(time.time())
+    placeholder_id = f"model#{model_name}"
+    placeholder = {
+        "instance_id": placeholder_id,
         "model": model_name,
         "status": "starting",
-        "ip": ip,
+        "ip": "",
         "instance_type": model_config["instance_type"],
-        "launched_at": int(time.time()),
-        "last_request_at": int(time.time()),
+        "launched_at": now,
+        "last_request_at": now,
     }
-    state.put_instance(instance)
 
-    # Poll for health
+    # Optimistic claim for scale-up ownership via conditional write.
+    claimed = state.put_instance_if_absent(placeholder)
+    if not claimed:
+        existing = state.list_instances(model=model_name, status="starting")
+        existing += state.list_instances(model=model_name, status="ready")
+        if existing:
+            return existing[0]
+        return placeholder
+
+    # Launch instance after successful claim.
+    logger.info("Launching instance for model %s", model_name)
+    provider_instance_id, ip = compute.launch(model_config)
+
+    state.update_instance(
+        placeholder_id,
+        provider_instance_id=provider_instance_id,
+        ip=ip,
+    )
+    placeholder["provider_instance_id"] = provider_instance_id
+    placeholder["ip"] = ip
+
     healthy = poll_health(ip, VLLM_PORT)
     if healthy:
-        state.update_instance(instance_id, status="ready")
-        instance["status"] = "ready"
-        logger.info("Instance %s is ready", instance_id)
+        state.update_instance(placeholder_id, status="ready")
+        placeholder["status"] = "ready"
+        logger.info("Instance %s is ready", provider_instance_id)
     else:
-        logger.error("Instance %s failed health check, terminating", instance_id)
-        compute.terminate(instance_id)
-        state.update_instance(instance_id, status="terminated")
-        instance["status"] = "terminated"
+        logger.error("Instance %s failed health check, terminating", provider_instance_id)
+        compute.terminate(provider_instance_id)
+        state.update_instance(placeholder_id, status="terminated")
+        placeholder["status"] = "terminated"
 
-    return instance
+    return placeholder
 
 
 def scale_down(
@@ -95,7 +114,7 @@ def scale_down(
                 now - last_request,
             )
             state.update_instance(inst["instance_id"], status="draining")
-            compute.terminate(inst["instance_id"])
+            compute.terminate(inst.get("provider_instance_id", inst["instance_id"]))
             state.update_instance(inst["instance_id"], status="terminated")
             terminated.append(inst["instance_id"])
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +47,19 @@ def _api_response(status_code: int, body: dict, headers: dict | None = None) -> 
     resp = {
         "statusCode": status_code,
         "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=_json_default),
     }
     if headers:
         resp["headers"].update(headers)
     return resp
+
+
+def _json_default(value):
+    """Serialize DynamoDB types that Python's JSON encoder does not handle."""
+    if isinstance(value, Decimal):
+        # Preserve integer semantics when possible (e.g. Decimal("1") -> 1).
+        return int(value) if value == value.to_integral_value() else float(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
 # ---- Phase 1: Orchestrator ----

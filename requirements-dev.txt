@@ -1,4 +1,0 @@
-pytest>=8.0
-testcontainers[localstack]>=4.0
-boto3>=1.34
-requests>=2.31

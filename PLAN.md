@@ -78,8 +78,7 @@ class ComputeBackend(Protocol):
 - `control-plane/backends/aws/__init__.py`, `state.py`, `compute.py` (stub), `handlers.py` (stub)
 - `control-plane/backends/mock/__init__.py`, `compute.py`, `state.py`
 - `control-plane/shared/__init__.py`, `config.py`
-- `control-plane/requirements.txt` — `boto3`, `requests`
-- `requirements-dev.txt` — `pytest`, `testcontainers[localstack]`
+- `control-plane/pyproject.toml` — runtime deps + dev extras (`pytest`, `testcontainers[localstack]`)
 - `tests/unit/conftest.py` — fixtures using mock backends
 - `tests/e2e/conftest.py` — testcontainers LocalStack + mock vLLM
 - `tests/e2e/mock_vllm.py` — mock vLLM HTTP server (background thread)
@@ -125,7 +124,7 @@ class ComputeBackend(Protocol):
 - `tests/e2e/test_full_lifecycle.py` — full cold-start → inference → scale-down cycle
 - `tests/e2e/test_auth.py` — rejected without key, accepted with key
 
-**Run:** `pytest tests/unit/ && pytest tests/e2e/`
+**Run:** `uv run --project control_plane --no-sync pytest tests/unit/ && uv run --project control_plane --no-sync pytest tests/e2e/`
 
 ### Phase 5: Google OAuth (post-MVP)
 ### Phase 6: Web UI (post-MVP)
@@ -135,10 +134,12 @@ class ComputeBackend(Protocol):
 
 ### Unit Tests (mock backends, no Docker)
 - Core logic tested against `InMemoryStateStore` + `MockComputeBackend`
-- Run: `pytest tests/unit/`
+- Install deps: `uv sync --project control_plane --extra dev`
+- Run: `uv run --project control_plane --no-sync pytest tests/unit/`
 
 ### E2E Tests (testcontainers)
 - `testcontainers[localstack]` spins up LocalStack from pytest
 - Mock vLLM runs as a background thread (`http.server`)
 - Tests call the AWS Lambda handlers directly (pointed at LocalStack DynamoDB) and verify full lifecycle
-- Run: `pytest tests/e2e/` (requires Docker)
+- Install deps: `uv sync --project control_plane --extra dev`
+- Run: `uv run --project control_plane --no-sync pytest tests/e2e/` (requires Docker)

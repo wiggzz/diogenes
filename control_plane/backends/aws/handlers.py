@@ -216,12 +216,15 @@ def cluster_handler(event, context):
     if method == "POST" and path == "/api/cluster/scale":
         body = json.loads(event.get("body", "{}"))
         trigger = _make_trigger_scale_up()
-        result = manual_scale(
-            model=body.get("model", ""),
-            action=body.get("action", "up"),
-            state=state,
-            trigger_scale_up=trigger,
-        )
+        try:
+            result = manual_scale(
+                model=body.get("model", ""),
+                action=body.get("action", "up"),
+                state=state,
+                trigger_scale_up=trigger,
+            )
+        except ValueError as exc:
+            return _api_response(400, {"error": str(exc)})
         return _api_response(200, result)
 
     return _api_response(404, {"error": "not found"})

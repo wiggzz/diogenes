@@ -111,6 +111,13 @@ class DynamoDBStateStore:
     def delete_api_key(self, key_hash: str) -> None:
         self._api_keys.delete_item(Key={"key_hash": key_hash})
 
+    def update_api_key_last_used(self, key_hash: str, ts: int) -> None:
+        self._api_keys.update_item(
+            Key={"key_hash": key_hash},
+            UpdateExpression="SET last_used_at = :ts",
+            ExpressionAttributeValues={":ts": ts},
+        )
+
     def list_api_keys(self, email: str) -> list[dict]:
         resp = self._api_keys.query(
             IndexName="email-index",

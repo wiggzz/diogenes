@@ -113,7 +113,7 @@ class ComputeBackend(Protocol):
 - `control-plane/core/auth.py` — `validate_api_key(token, state) -> (bool, email)`
 - `control-plane/core/keys.py` — `create_key(email, name, state)`, `list_keys(email, state)`, `delete_key(hash, email, state)`
 - `control-plane/backends/aws/handlers.py` — add `authorizer_handler` (API Gateway v2 format), `keys_handler`
-- `scripts/create_api_key.py` — CLI seed script
+- `scripts/create_api_key.py` — manual CLI seed script (run after deploy/bootstrap to create initial key)
 - `tests/unit/test_auth.py`, `tests/unit/test_keys.py`
 
 ### Phase 4: Cluster State + E2E Test

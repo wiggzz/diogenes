@@ -146,7 +146,7 @@ def authorizer_handler(event, context):
     state = _get_state_store()
 
     headers = event.get("headers", {})
-    auth_header = headers.get("authorization", "")
+    auth_header = headers.get("authorization", headers.get("Authorization", ""))
     token = auth_header.replace("Bearer ", "", 1) if auth_header.startswith("Bearer ") else ""
 
     if not token:
@@ -191,7 +191,9 @@ def keys_handler(event, context):
 
     if method == "DELETE" and "/api/keys/" in path:
         key_id = event.get("pathParameters", {}).get("key_id", "")
-        delete_key(key_id, email, state)
+        deleted = delete_key(key_id, email, state)
+        if not deleted:
+            return _api_response(404, {"error": "key not found"})
         return _api_response(200, {"deleted": True})
 
     return _api_response(404, {"error": "not found"})

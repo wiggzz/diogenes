@@ -61,6 +61,10 @@ class StateStore(Protocol):
         """Delete an API key by its hash."""
         ...
 
+    def update_api_key_last_used(self, key_hash: str, ts: int) -> None:
+        """Update last_used_at timestamp for an API key."""
+        ...
+
     def list_api_keys(self, email: str) -> list[dict]:
         """List all API keys belonging to an email."""
         ...

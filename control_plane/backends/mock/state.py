@@ -62,5 +62,10 @@ class InMemoryStateStore:
     def delete_api_key(self, key_hash: str) -> None:
         self._api_keys.pop(key_hash, None)
 
+    def update_api_key_last_used(self, key_hash: str, ts: int) -> None:
+        key = self._api_keys.get(key_hash)
+        if key is not None:
+            key["last_used_at"] = ts
+
     def list_api_keys(self, email: str) -> list[dict]:
         return [k for k in self._api_keys.values() if k.get("email") == email]

@@ -1,12 +1,18 @@
-.PHONY: test test-unit test-e2e build deploy validate clean
+.PHONY: setup setup-dev test test-unit test-e2e build deploy validate clean
+
+setup:
+	uv sync --project control_plane
+
+setup-dev:
+	uv sync --project control_plane --extra dev
 
 test: test-unit
 
 test-unit:
-	python -m pytest tests/unit/ -v
+	uv run --project control_plane --no-sync pytest tests/unit/ -v
 
 test-e2e:
-	python -m pytest tests/e2e/ -v
+	uv run --project control_plane --no-sync pytest tests/e2e/ -v
 
 build:
 	sam build

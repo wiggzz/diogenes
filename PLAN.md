@@ -109,6 +109,8 @@ class ComputeBackend(Protocol):
 
 ### Phase 3: Auth (API Keys)
 
+**Status:** Completed
+
 **Files:**
 - `control-plane/core/auth.py` — `validate_api_key(token, state) -> (bool, email)`
 - `control-plane/core/keys.py` — `create_key(email, name, state)`, `list_keys(email, state)`, `delete_key(hash, email, state)`

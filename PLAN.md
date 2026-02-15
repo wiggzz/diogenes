@@ -116,6 +116,13 @@ class ComputeBackend(Protocol):
 - `scripts/create_api_key.py` — manual CLI seed script (run after deploy/bootstrap to create initial key)
 - `tests/unit/test_auth.py`, `tests/unit/test_keys.py`
 
+**Delivered behavior (Phase 3):**
+- `dio-...` API keys are stored hashed (SHA-256), never in plaintext.
+- Authorizer validates bearer keys and injects caller email into request context.
+- Successful key use updates `last_used_at` for auditing.
+- Keys API supports create/list/delete with owner-scoped deletion checks.
+- Bootstrap remains script-first via `make seed-api-key EMAIL=... [NAME=...]`.
+
 ### Phase 4: Cluster State + E2E Test
 
 **Files:**

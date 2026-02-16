@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Diogenes GPU AMI pipeline (EC2 Image Builder)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  BaseAmiId:
+    Type: String
+    Description: Parent/base AMI for image recipe
+  BuilderSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for Image Builder temporary instances
+  BuilderSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for Image Builder temporary instances
+  BuilderInstanceType:
+    Type: String
+    Default: t3.small
+    Description: Instance type used by Image Builder during AMI creation
+  ImageVersion:
+    Type: String
+    Default: 1.0.0
+    Description: Semantic version for Image Builder component/recipe (bump on recipe changes)
+  PipelineStatus:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+
+Resources:
+  ImageBuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub diogenes-imagebuilder-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ImageBuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub diogenes-imagebuilder-profile-${Environment}
+      Roles:
+        - !Ref ImageBuilderRole
+
+  DiogenesSetupComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: !Sub diogenes-setup-${Environment}
+      Platform: Linux
+      Version: !Ref ImageVersion
+      Description: Install Docker + NVIDIA container runtime and register vLLM service
+      Data: |
+        name: DiogenesSetup
+        description: Install runtime dependencies for Diogenes GPU nodes.
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: SetupDiogenes
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      export DEBIAN_FRONTEND=noninteractive
+                      apt-get update
+                      apt-get install -y --no-install-recommends ca-certificates curl git jq python3 python3-pip python3-venv docker.io gpg
+                      systemctl enable --now docker
+                      curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+                      curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+                      apt-get update
+                      apt-get install -y --no-install-recommends nvidia-container-toolkit
+                      nvidia-ctk runtime configure --runtime=docker
+                      systemctl restart docker
+                      cat > /etc/diogenes-model.env <<'EOF'
+                      MODEL_NAME=
+                      VLLM_ARGS=
+                      EOF
+                      install -d -m 0755 /opt/diogenes
+                      cat > /opt/diogenes/start_vllm.sh <<'EOF'
+                      #!/usr/bin/env bash
+                      set -euo pipefail
+                      source /etc/diogenes-model.env
+                      if [[ -z "${MODEL_NAME:-}" ]]; then
+                        echo "MODEL_NAME is required in /etc/diogenes-model.env"
+                        exit 1
+                      fi
+                      exec docker run --rm --gpus all --network host \
+                        -e HUGGING_FACE_HUB_TOKEN="${HUGGING_FACE_HUB_TOKEN:-}" \
+                        vllm/vllm-openai:latest \
+                        --model "$MODEL_NAME" \
+                        --host 0.0.0.0 --port 8000 \
+                        ${VLLM_ARGS:-}
+                      EOF
+                      chmod +x /opt/diogenes/start_vllm.sh
+                      cat > /etc/systemd/system/vllm.service <<'EOF'
+                      [Unit]
+                      Description=Diogenes vLLM server
+                      After=network-online.target docker.service
+                      Wants=network-online.target
+                      Requires=docker.service
+                      [Service]
+                      Type=simple
+                      Restart=always
+                      RestartSec=5
+                      EnvironmentFile=/etc/diogenes-model.env
+                      ExecStart=/opt/diogenes/start_vllm.sh
+                      [Install]
+                      WantedBy=multi-user.target
+                      EOF
+                      systemctl daemon-reload
+                      systemctl enable vllm.service
+                      echo "DIOGENES_BOOTSTRAP_DONE" > /var/log/diogenes-bootstrap.done
+
+  DiogenesImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: !Sub diogenes-gpu-recipe-${Environment}
+      Version: !Ref ImageVersion
+      ParentImage: !Ref BaseAmiId
+      Components:
+        - ComponentArn: !Ref DiogenesSetupComponent
+
+  DiogenesInfrastructureConfig:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: !Sub diogenes-gpu-infra-${Environment}
+      InstanceProfileName: !Ref ImageBuilderInstanceProfile
+      InstanceTypes:
+        - !Ref BuilderInstanceType
+      SubnetId: !Ref BuilderSubnetId
+      SecurityGroupIds:
+        - !Ref BuilderSecurityGroupId
+      TerminateInstanceOnFailure: true
+
+  DiogenesDistributionConfig:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: !Sub diogenes-gpu-dist-${Environment}
+      Distributions:
+        - Region: !Ref AWS::Region
+          AmiDistributionConfiguration:
+            Name: !Sub diogenes-gpu-{{ imagebuilder:buildDate }}
+            Description: !Sub Diogenes GPU AMI (${Environment})
+            AmiTags:
+              Project: diogenes
+              Environment: !Ref Environment
+
+  DiogenesImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name: !Sub diogenes-gpu-pipeline-${Environment}
+      Status: !Ref PipelineStatus
+      ImageRecipeArn: !Ref DiogenesImageRecipe
+      InfrastructureConfigurationArn: !Ref DiogenesInfrastructureConfig
+      DistributionConfigurationArn: !Ref DiogenesDistributionConfig
+      ImageTestsConfiguration:
+        ImageTestsEnabled: false
+
+Outputs:
+  ImagePipelineArn:
+    Description: ARN of the Diogenes Image Builder pipeline
+    Value: !Ref DiogenesImagePipeline
+  ImageRecipeArn:
+    Value: !Ref DiogenesImageRecipe

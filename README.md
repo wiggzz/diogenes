@@ -45,7 +45,7 @@ make validate
 make build
 ```
 
-### 6. Build a GPU AMI (Automated)
+### 6. Build a GPU AMI (Image Builder)
 
 ```bash
 AWS_REGION=us-east-1 \
@@ -54,20 +54,21 @@ make ami-build
 
 Optional environment variables:
 - `BASE_AMI_ID` (if omitted, script uses regional defaults when available)
-- `GPU_SUBNET_ID` (if omitted, script auto-selects a subnet)
-- `GPU_SECURITY_GROUP_ID` (if omitted, script auto-selects a security group in the subnet VPC)
-- `INSTANCE_TYPE` (default `t3.small`, used only for AMI build instance)
-- `AMI_NAME_PREFIX` (default `diogenes-gpu`)
-- `USE_SSM_WAIT` (default `1`, uses SSM to detect bootstrap completion)
-- `SSM_ONLINE_TIMEOUT` (default `600`)
-- `SSM_POLL_INTERVAL` (default `10`)
-- `BOOTSTRAP_WAIT_SECONDS` (default `900`)
-- `TEMP_INSTANCE_PROFILE` (recommended for SSM wait; instance profile name with `AmazonSSMManagedInstanceCore`)
-- `AUTO_CREATE_SSM_PROFILE` (default `1`; auto-upserts IAM role/profile for SSM wait)
-- `SSM_ROLE_NAME` (default `diogenes-ami-builder-role`)
-- `SSM_PROFILE_NAME` (default `diogenes-ami-builder-profile`)
-- `TEMP_KEY_NAME` (optional)
-- `KEEP_TEMP_INSTANCE=1` (skip terminate for debugging)
+- `BUILDER_SUBNET_ID` (if omitted, script auto-selects a subnet)
+- `BUILDER_SECURITY_GROUP_ID` (if omitted, script auto-selects a security group in the subnet VPC)
+- `BUILDER_INSTANCE_TYPE` (default `t3.small`, used only for AMI build instances)
+- `IMAGE_VERSION` (default `1.0.0`; bump when recipe changes)
+- `AMI_PIPELINE_STACK` (default `diogenes-ami-pipeline`)
+- `AMI_PIPELINE_ENV` (default `dev`)
+- `PIPELINE_STATUS` (default `DISABLED`)
+
+Useful subcommands:
+
+```bash
+AWS_REGION=us-east-1 make ami-build-deploy  # deploy/update pipeline stack only
+AWS_REGION=us-east-1 make ami-build-start   # start a new image build
+AWS_REGION=us-east-1 make ami-build-latest  # print latest AMI ID from pipeline
+```
 
 Regional defaults (community-maintained, PRs welcome):
 
@@ -81,7 +82,10 @@ Regional defaults (community-maintained, PRs welcome):
 - `make setup` - install runtime deps
 - `make setup-dev` - install runtime + dev deps
 - `make sync-requirements` - regenerate `control_plane/requirements.txt` from `control_plane/pyproject.toml`
-- `make ami-build` - build a GPU AMI from `ami/setup.sh` via AWS CLI
+- `make ami-build` - deploy Image Builder stack and build a GPU AMI
+- `make ami-build-deploy` - deploy/update Image Builder stack only
+- `make ami-build-start` - start a new Image Builder pipeline execution
+- `make ami-build-latest` - print latest AMI ID built by pipeline
 - `make test` - run default test target (`test-unit`)
 - `make test-unit` - run unit tests
 - `make test-e2e` - run E2E tests

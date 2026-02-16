@@ -93,7 +93,7 @@ class ComputeBackend(Protocol):
   - `poll_health(ip, port, timeout, interval)` — generic HTTP health check
 - `control-plane/backends/aws/compute.py` — EC2 `launch()` / `terminate()`
 - `control-plane/backends/aws/handlers.py` — `orchestrator_handler(event, context)`: dispatch async invoke (scale-up) vs EventBridge (scale-down)
-- `ami/setup.sh` — GPU AMI bootstrap
+- `ami/imagebuilder-template.yaml`, `ami/imagebuilder.sh` — GPU AMI pipeline/bootstrap via EC2 Image Builder
 - `tests/unit/test_orchestrator.py`
 
 ### Phase 2: Router

@@ -46,6 +46,16 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
+      Auth:
+        DefaultAuthorizer: ApiLambdaAuthorizer
+        Authorizers:
+          ApiLambdaAuthorizer:
+            AuthorizerPayloadFormatVersion: 2.0
+            EnableSimpleResponses: true
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            Identity:
+              Headers:
+                - Authorization
       CorsConfiguration:
         AllowOrigins:
           - "*"

@@ -80,3 +80,6 @@ EOF
 
 systemctl daemon-reload
 systemctl enable vllm.service
+
+# Marker used by AMI build automation to detect bootstrap completion.
+echo "DIOGENES_BOOTSTRAP_DONE" > /var/log/diogenes-bootstrap.done

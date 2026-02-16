@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev sync-requirements test test-unit test-e2e build deploy validate clean
+.PHONY: setup setup-dev sync-requirements ami-build test test-unit test-e2e build deploy validate clean
 
 setup:
 	uv sync --project control_plane
@@ -8,6 +8,9 @@ setup-dev:
 
 sync-requirements:
 	uv export --project control_plane --no-dev --no-hashes --no-header --output-file control_plane/requirements.txt
+
+ami-build:
+	./ami/build.sh
 
 test: test-unit
 

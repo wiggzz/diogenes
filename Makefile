@@ -1,5 +1,7 @@
 .PHONY: setup setup-dev sync-requirements ami-build ami-build-deploy ami-build-start ami-build-latest test test-unit test-e2e build deploy validate clean
 
+STACK_NAME ?= diogenes
+
 setup:
 	uv sync --project control_plane
 
@@ -32,8 +34,8 @@ test-e2e:
 build: sync-requirements
 	sam build
 
-deploy: build
-	sam deploy
+deploy:
+	STACK_NAME="$(STACK_NAME)" ./scripts/deploy.sh
 
 validate:
 	sam validate

@@ -45,6 +45,26 @@ make validate
 make build
 ```
 
+### 5b. One-Command Deploy (Auto Params)
+
+```bash
+AWS_REGION=ap-southeast-2 make deploy
+```
+
+This command automatically:
+- builds/uses a GPU AMI from the Image Builder pipeline
+- discovers `GpuSubnetId` and `GpuSecurityGroupId`
+- runs `sam build` and `sam deploy` with parameter overrides
+
+Optional deploy environment variables:
+- `STACK_NAME` (default `diogenes`)
+- `ENVIRONMENT` (default `dev`)
+- `AMI_BUILD_MODE=auto` (default): use latest pipeline AMI, build if missing
+- `AMI_BUILD_MODE=latest`: require latest pipeline AMI
+- `AMI_BUILD_MODE=build`: always build a new AMI first
+- `GPU_AMI_ID`, `GPU_SUBNET_ID`, `GPU_SECURITY_GROUP_ID` to override auto-discovery
+- `ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID` for auth configuration
+
 ### 6. Build a GPU AMI (Image Builder)
 
 ```bash
@@ -91,7 +111,7 @@ Regional defaults (community-maintained, PRs welcome):
 - `make test-e2e` - run E2E tests
 - `make validate` - validate SAM template
 - `make build` - SAM build
-- `make deploy` - SAM deploy
+- `make deploy` - one-command auto deploy (AMI + network param auto-resolution + SAM deploy)
 
 Dependency note:
 - `control_plane/pyproject.toml` is the source of truth.

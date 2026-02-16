@@ -5,6 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from pathlib import Path
+
+# Ensure repository root is importable when running via uv project context.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from control_plane.backends.aws.state import DynamoDBStateStore
 from control_plane.core.keys import create_key

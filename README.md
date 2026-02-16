@@ -63,6 +63,9 @@ Optional environment variables:
 - `SSM_POLL_INTERVAL` (default `10`)
 - `BOOTSTRAP_WAIT_SECONDS` (default `900`)
 - `TEMP_INSTANCE_PROFILE` (recommended for SSM wait; instance profile name with `AmazonSSMManagedInstanceCore`)
+- `AUTO_CREATE_SSM_PROFILE` (default `1`; auto-upserts IAM role/profile for SSM wait)
+- `SSM_ROLE_NAME` (default `diogenes-ami-builder-role`)
+- `SSM_PROFILE_NAME` (default `diogenes-ami-builder-profile`)
 - `TEMP_KEY_NAME` (optional)
 - `KEEP_TEMP_INSTANCE=1` (skip terminate for debugging)
 

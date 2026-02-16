@@ -17,6 +17,9 @@ set -euo pipefail
 #   SSM_POLL_INTERVAL        (default: 10)
 #   BOOTSTRAP_WAIT_SECONDS   (default: 900)
 #   TEMP_INSTANCE_PROFILE    (optional instance profile name)
+#   AUTO_CREATE_SSM_PROFILE  (default: 1; create IAM role/profile if needed for SSM wait)
+#   SSM_ROLE_NAME            (default: diogenes-ami-builder-role)
+#   SSM_PROFILE_NAME         (default: diogenes-ami-builder-profile)
 #   TEMP_KEY_NAME            (optional EC2 key pair name)
 #   KEEP_TEMP_INSTANCE       (set to 1 to skip terminate)
 
@@ -36,6 +39,9 @@ USE_SSM_WAIT="${USE_SSM_WAIT:-1}"
 SSM_ONLINE_TIMEOUT="${SSM_ONLINE_TIMEOUT:-600}"
 SSM_POLL_INTERVAL="${SSM_POLL_INTERVAL:-10}"
 BOOTSTRAP_WAIT_SECONDS="${BOOTSTRAP_WAIT_SECONDS:-900}"
+AUTO_CREATE_SSM_PROFILE="${AUTO_CREATE_SSM_PROFILE:-1}"
+SSM_ROLE_NAME="${SSM_ROLE_NAME:-diogenes-ami-builder-role}"
+SSM_PROFILE_NAME="${SSM_PROFILE_NAME:-diogenes-ami-builder-profile}"
 KEEP_TEMP_INSTANCE="${KEEP_TEMP_INSTANCE:-0}"
 
 default_base_ami_for_region() {
@@ -149,6 +155,52 @@ resolve_temp_instance_profile() {
   return 1
 }
 
+ensure_ssm_role_and_profile() {
+  local trust_policy
+  trust_policy='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+
+  if ! aws iam get-role --role-name "${SSM_ROLE_NAME}" >/dev/null 2>&1; then
+    echo "Creating IAM role ${SSM_ROLE_NAME}..."
+    aws iam create-role \
+      --role-name "${SSM_ROLE_NAME}" \
+      --assume-role-policy-document "${trust_policy}" >/dev/null
+  fi
+
+  aws iam attach-role-policy \
+    --role-name "${SSM_ROLE_NAME}" \
+    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" >/dev/null
+
+  if ! aws iam get-instance-profile --instance-profile-name "${SSM_PROFILE_NAME}" >/dev/null 2>&1; then
+    echo "Creating instance profile ${SSM_PROFILE_NAME}..."
+    aws iam create-instance-profile \
+      --instance-profile-name "${SSM_PROFILE_NAME}" >/dev/null
+  fi
+
+  local has_role
+  has_role="$(
+    aws iam get-instance-profile \
+      --instance-profile-name "${SSM_PROFILE_NAME}" \
+      --query "contains(InstanceProfile.Roles[].RoleName, '${SSM_ROLE_NAME}')" \
+      --output text 2>/dev/null || echo "False"
+  )"
+  if [[ "${has_role}" != "True" ]]; then
+    echo "Attaching role ${SSM_ROLE_NAME} to profile ${SSM_PROFILE_NAME}..."
+    aws iam add-role-to-instance-profile \
+      --instance-profile-name "${SSM_PROFILE_NAME}" \
+      --role-name "${SSM_ROLE_NAME}" >/dev/null
+    # Give IAM eventual consistency a brief moment.
+    sleep 10
+  fi
+
+  TEMP_INSTANCE_PROFILE="${SSM_PROFILE_NAME}"
+  echo "Using TEMP_INSTANCE_PROFILE=${TEMP_INSTANCE_PROFILE}"
+}
+
+if ! command -v aws >/dev/null 2>&1; then
+  echo "aws CLI not found on PATH" >&2
+  exit 1
+fi
+
 if [[ -z "${BASE_AMI_ID:-}" ]]; then
   BASE_AMI_ID="$(default_base_ami_for_region "${AWS_REGION}")"
 fi
@@ -186,15 +238,12 @@ fi
 if [[ "${USE_SSM_WAIT}" == "1" && -z "${TEMP_INSTANCE_PROFILE:-}" ]]; then
   if TEMP_INSTANCE_PROFILE="$(resolve_temp_instance_profile)"; then
     echo "Auto-selected TEMP_INSTANCE_PROFILE=${TEMP_INSTANCE_PROFILE} for SSM checks"
+  elif [[ "${AUTO_CREATE_SSM_PROFILE}" == "1" ]]; then
+    ensure_ssm_role_and_profile
   else
     echo "No SSM-capable TEMP_INSTANCE_PROFILE found; disabling SSM wait and using fixed wait fallback." >&2
     USE_SSM_WAIT="0"
   fi
-fi
-
-if ! command -v aws >/dev/null 2>&1; then
-  echo "aws CLI not found on PATH" >&2
-  exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

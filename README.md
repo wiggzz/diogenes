@@ -49,12 +49,17 @@ make build
 
 - `make setup` - install runtime deps
 - `make setup-dev` - install runtime + dev deps
+- `make sync-requirements` - regenerate `control_plane/requirements.txt` from `control_plane/pyproject.toml`
 - `make test` - run default test target (`test-unit`)
 - `make test-unit` - run unit tests
 - `make test-e2e` - run E2E tests
 - `make validate` - validate SAM template
 - `make build` - SAM build
 - `make deploy` - SAM deploy
+
+Dependency note:
+- `control_plane/pyproject.toml` is the source of truth.
+- `make build` runs `make sync-requirements` first so SAM packaging stays in sync.
 
 ## Repository Layout
 
@@ -64,4 +69,3 @@ make build
 - `tests/unit/` - unit tests with mock backends
 - `tests/e2e/` - E2E tests (mock vLLM + optional LocalStack)
 - `scripts/create_api_key.py` - API key creation helper
-

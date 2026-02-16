@@ -33,3 +33,6 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Generated from uv export for SAM packaging
+control_plane/requirements.txt

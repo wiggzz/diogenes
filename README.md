@@ -57,7 +57,7 @@ Optional environment variables:
 - `BUILDER_SUBNET_ID` (if omitted, script auto-selects a subnet)
 - `BUILDER_SECURITY_GROUP_ID` (if omitted, script auto-selects a security group in the subnet VPC)
 - `BUILDER_INSTANCE_TYPE` (default `t3.small`, used only for AMI build instances)
-- `IMAGE_VERSION` (default `1.0.0`; bump when recipe changes)
+- `IMAGE_VERSION` (default `1.0.2`; bump when recipe changes)
 - `AMI_PIPELINE_STACK` (default `diogenes-ami-pipeline`)
 - `AMI_PIPELINE_ENV` (default `dev`)
 - `PIPELINE_STATUS` (default `DISABLED`)

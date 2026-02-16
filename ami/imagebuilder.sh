@@ -19,7 +19,7 @@ set -euo pipefail
 #   BUILDER_SUBNET_ID      (auto-selected if omitted)
 #   BUILDER_SECURITY_GROUP_ID (auto-selected if omitted)
 #   BUILDER_INSTANCE_TYPE  (default: t3.small)
-#   IMAGE_VERSION          (default: 1.0.0)
+#   IMAGE_VERSION          (default: 1.0.2)
 #   PIPELINE_STATUS        (default: DISABLED)
 
 require() {
@@ -41,7 +41,7 @@ cmd="${1:-build}"
 AMI_PIPELINE_STACK="${AMI_PIPELINE_STACK:-diogenes-ami-pipeline}"
 AMI_PIPELINE_ENV="${AMI_PIPELINE_ENV:-dev}"
 BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-t3.small}"
-IMAGE_VERSION="${IMAGE_VERSION:-1.0.0}"
+IMAGE_VERSION="${IMAGE_VERSION:-1.0.2}"
 PIPELINE_STATUS="${PIPELINE_STATUS:-DISABLED}"
 TEMPLATE_FILE="${TEMPLATE_FILE:-ami/imagebuilder-template.yaml}"
 
@@ -152,19 +152,37 @@ resolve_defaults() {
 deploy_pipeline_stack() {
   resolve_defaults
   echo "Deploying Image Builder stack ${AMI_PIPELINE_STACK} in ${AWS_REGION}..."
-  aws cloudformation deploy \
-    --region "${AWS_REGION}" \
-    --stack-name "${AMI_PIPELINE_STACK}" \
-    --template-file "${TEMPLATE_FILE}" \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --parameter-overrides \
-      Environment="${AMI_PIPELINE_ENV}" \
-      BaseAmiId="${BASE_AMI_ID}" \
-      BuilderSubnetId="${BUILDER_SUBNET_ID}" \
-      BuilderSecurityGroupId="${BUILDER_SECURITY_GROUP_ID}" \
-      BuilderInstanceType="${BUILDER_INSTANCE_TYPE}" \
-      ImageVersion="${IMAGE_VERSION}" \
-      PipelineStatus="${PIPELINE_STATUS}"
+  local output rc
+  set +e
+  output="$(
+    aws cloudformation deploy \
+      --region "${AWS_REGION}" \
+      --stack-name "${AMI_PIPELINE_STACK}" \
+      --template-file "${TEMPLATE_FILE}" \
+      --capabilities CAPABILITY_NAMED_IAM \
+      --parameter-overrides \
+        Environment="${AMI_PIPELINE_ENV}" \
+        BaseAmiId="${BASE_AMI_ID}" \
+        BuilderSubnetId="${BUILDER_SUBNET_ID}" \
+        BuilderSecurityGroupId="${BUILDER_SECURITY_GROUP_ID}" \
+        BuilderInstanceType="${BUILDER_INSTANCE_TYPE}" \
+        ImageVersion="${IMAGE_VERSION}" \
+        PipelineStatus="${PIPELINE_STATUS}" 2>&1
+  )"
+  rc=$?
+  set -e
+
+  if [[ ${rc} -ne 0 ]]; then
+    if echo "${output}" | grep -q "No changes to deploy"; then
+      echo "${output}"
+      echo "Stack is up to date; continuing."
+    else
+      echo "${output}" >&2
+      return "${rc}"
+    fi
+  else
+    echo "${output}"
+  fi
 }
 
 get_pipeline_arn() {
@@ -180,13 +198,20 @@ wait_for_build() {
   echo "Waiting for image build: ${image_build_arn}"
 
   while true; do
-    local status
+    local status reason
     status="$(
       aws imagebuilder get-image \
         --region "${AWS_REGION}" \
         --image-build-version-arn "${image_build_arn}" \
         --query "image.state.status" \
         --output text
+    )"
+    reason="$(
+      aws imagebuilder get-image \
+        --region "${AWS_REGION}" \
+        --image-build-version-arn "${image_build_arn}" \
+        --query "image.state.reason" \
+        --output text 2>/dev/null || true
     )"
     case "${status}" in
       AVAILABLE)
@@ -218,6 +243,61 @@ wait_for_build() {
           --image-build-version-arn "${image_build_arn}" \
           --query "image.state" \
           --output json >&2 || true
+        if [[ -n "${reason}" && "${reason}" != "None" ]]; then
+          local workflow_execution_id
+          workflow_execution_id="$(echo "${reason}" | sed -n "s/.*Workflow Execution ID: '\\([^']*\\)'.*/\\1/p")"
+          if [[ -n "${workflow_execution_id}" ]]; then
+            echo "Workflow execution diagnostics (${workflow_execution_id}):" >&2
+            aws imagebuilder get-workflow-execution \
+              --region "${AWS_REGION}" \
+              --workflow-execution-id "${workflow_execution_id}" \
+              --output json >&2 || true
+            aws imagebuilder list-workflow-step-executions \
+              --region "${AWS_REGION}" \
+              --workflow-execution-id "${workflow_execution_id}" \
+              --output json >&2 || true
+
+            local failed_steps
+            failed_steps="$(
+              aws imagebuilder list-workflow-step-executions \
+                --region "${AWS_REGION}" \
+                --workflow-execution-id "${workflow_execution_id}" \
+                --query "steps[?status=='FAILED'].stepExecutionId" \
+                --output text 2>/dev/null || true
+            )"
+            if [[ -n "${failed_steps}" && "${failed_steps}" != "None" ]]; then
+              local step_id
+              for step_id in ${failed_steps}; do
+                echo "Failed step details (${step_id}):" >&2
+                local step_json step_outputs run_command_id
+                step_json="$(
+                  aws imagebuilder get-workflow-step-execution \
+                    --region "${AWS_REGION}" \
+                    --step-execution-id "${step_id}" \
+                    --output json
+                )"
+                echo "${step_json}" >&2
+
+                step_outputs="$(
+                  aws imagebuilder get-workflow-step-execution \
+                    --region "${AWS_REGION}" \
+                    --step-execution-id "${step_id}" \
+                    --query "outputs" \
+                    --output text 2>/dev/null || true
+                )"
+                run_command_id="$(echo "${step_outputs}" | sed -n 's/.*"runCommandId": "\([^"]*\)".*/\1/p')"
+                if [[ -n "${run_command_id}" ]]; then
+                  echo "SSM command diagnostics (${run_command_id}):" >&2
+                  aws ssm list-command-invocations \
+                    --region "${AWS_REGION}" \
+                    --command-id "${run_command_id}" \
+                    --details \
+                    --output json >&2 || true
+                fi
+              done
+            fi
+          fi
+        fi
         exit 1
         ;;
       *)

@@ -59,11 +59,17 @@ This command automatically:
 Optional deploy environment variables:
 - `STACK_NAME` (default `diogenes`)
 - `ENVIRONMENT` (default `dev`)
+- `DEPLOY_DEFAULTS_FILE` (default `.diogenes/deploy-<region>-<stack>.env`)
 - `AMI_BUILD_MODE=auto` (default): use latest pipeline AMI, build if missing
 - `AMI_BUILD_MODE=latest`: require latest pipeline AMI
 - `AMI_BUILD_MODE=build`: always build a new AMI first
 - `GPU_AMI_ID`, `GPU_SUBNET_ID`, `GPU_SECURITY_GROUP_ID` to override auto-discovery
 - `ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID` for auth configuration
+
+Network defaults behavior:
+- First deploy auto-discovers subnet/security group and writes them to `DEPLOY_DEFAULTS_FILE`.
+- Later deploys reuse those pinned values by default for consistency.
+- Delete the file (or set explicit `GPU_SUBNET_ID` / `GPU_SECURITY_GROUP_ID`) to re-select.
 
 ### 6. Build a GPU AMI (Image Builder)
 
@@ -101,7 +107,7 @@ Regional defaults (community-maintained, PRs welcome):
 
 - `make setup` - install runtime deps
 - `make setup-dev` - install runtime + dev deps
-- `make sync-requirements` - regenerate `control_plane/requirements.txt` from `control_plane/pyproject.toml`
+- `make sync-requirements` - regenerate root `requirements.txt` from `control_plane/pyproject.toml`
 - `make ami-build` - deploy Image Builder stack and build a GPU AMI
 - `make ami-build-deploy` - deploy/update Image Builder stack only
 - `make ami-build-start` - start a new Image Builder pipeline execution

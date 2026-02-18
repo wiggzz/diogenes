@@ -35,4 +35,6 @@ htmlcov/
 .coverage
 
 # Generated from uv export for SAM packaging
-control_plane/requirements.txt
+requirements.txt
+
+.diogenes

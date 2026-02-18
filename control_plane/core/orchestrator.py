@@ -36,6 +36,11 @@ def scale_up(
         logger.info("Instance already exists for %s: %s", model_name, existing[0]["instance_id"])
         return existing[0]
 
+    # Clean up any stale terminated record so put_instance_if_absent can succeed.
+    stale = state.list_instances(model=model_name, status="terminated")
+    for inst in stale:
+        state.delete_instance(inst["instance_id"])
+
     model_config = state.get_model_config(model_name)
     if model_config is None:
         raise ValueError(f"Unknown model: {model_name}")
@@ -63,7 +68,12 @@ def scale_up(
 
     # Launch instance after successful claim.
     logger.info("Launching instance for model %s", model_name)
-    provider_instance_id, ip = compute.launch(model_config)
+    try:
+        provider_instance_id, ip = compute.launch(model_config)
+    except Exception:
+        logger.exception("Failed to launch instance for model %s, cleaning up placeholder", model_name)
+        state.update_instance(placeholder_id, status="terminated")
+        raise
 
     state.update_instance(
         placeholder_id,

@@ -68,7 +68,7 @@ set -euo pipefail
 # Write model config
 cat > /etc/diogenes-model.env << 'MODELEOF'
 MODEL_NAME={model_config['name']}
-VLLM_ARGS={vllm_args}
+VLLM_ARGS="{vllm_args}"
 MODELEOF
 
 # Start vLLM (assumes AMI has vllm installed and systemd service configured)

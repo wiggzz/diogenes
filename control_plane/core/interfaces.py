@@ -37,6 +37,10 @@ class StateStore(Protocol):
         """Create an instance record if its primary key does not already exist."""
         ...
 
+    def delete_instance(self, instance_id: str) -> None:
+        """Delete an instance record by ID."""
+        ...
+
     # --- Models ---
 
     def get_model_config(self, model_name: str) -> dict | None:

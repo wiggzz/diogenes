@@ -13,10 +13,13 @@ class DynamoDBStateStore:
         models_table: str,
         api_keys_table: str,
         endpoint_url: str | None = None,
+        region_name: str | None = None,
     ):
         kwargs = {}
         if endpoint_url:
             kwargs["endpoint_url"] = endpoint_url
+        if region_name:
+            kwargs["region_name"] = region_name
         dynamodb = boto3.resource("dynamodb", **kwargs)
         self._instances = dynamodb.Table(instances_table)
         self._models = dynamodb.Table(models_table)
@@ -77,6 +80,9 @@ class DynamoDBStateStore:
         )
 
 
+
+    def delete_instance(self, instance_id: str) -> None:
+        self._instances.delete_item(Key={"instance_id": instance_id})
 
     def put_instance_if_absent(self, instance: dict) -> bool:
         try:

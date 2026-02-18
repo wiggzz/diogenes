@@ -16,17 +16,22 @@ logger = logging.getLogger(__name__)
 
 # ---- Shared helpers ----
 
+_state_store = None
+
 
 def _get_state_store():
-    """Build a DynamoDBStateStore from environment variables."""
-    from control_plane.shared.config import INSTANCES_TABLE, MODELS_TABLE, API_KEYS_TABLE
-    from control_plane.backends.aws.state import DynamoDBStateStore
+    """Return a cached DynamoDBStateStore (built once per Lambda execution environment)."""
+    global _state_store
+    if _state_store is None:
+        from control_plane.shared.config import INSTANCES_TABLE, MODELS_TABLE, API_KEYS_TABLE
+        from control_plane.backends.aws.state import DynamoDBStateStore
 
-    return DynamoDBStateStore(
-        instances_table=INSTANCES_TABLE(),
-        models_table=MODELS_TABLE(),
-        api_keys_table=API_KEYS_TABLE(),
-    )
+        _state_store = DynamoDBStateStore(
+            instances_table=INSTANCES_TABLE(),
+            models_table=MODELS_TABLE(),
+            api_keys_table=API_KEYS_TABLE(),
+        )
+    return _state_store
 
 
 def _get_compute_backend():
@@ -81,11 +86,11 @@ def orchestrator_handler(event, context):
     if action == "scale_up":
         model_name = event["model"]
         result = scale_up(model_name, state, compute)
-        return {"statusCode": 200, "body": json.dumps(result)}
+        return {"statusCode": 200, "body": json.dumps(result, default=_json_default)}
 
     elif action == "scale_down" or event.get("source") in ("schedule", "aws.events"):
         terminated = scale_down(state, compute)
-        return {"statusCode": 200, "body": json.dumps({"terminated": terminated})}
+        return {"statusCode": 200, "body": json.dumps({"terminated": terminated}, default=_json_default)}
 
     else:
         logger.warning("Unknown orchestrator event: %s", event)

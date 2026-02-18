@@ -52,6 +52,7 @@ Resources:
           ApiLambdaAuthorizer:
             AuthorizerPayloadFormatVersion: 2.0
             EnableSimpleResponses: true
+            EnableFunctionDefaultPermissions: true
             FunctionArn: !GetAtt AuthorizerFunction.Arn
             Identity:
               Headers:
@@ -131,7 +132,7 @@ Resources:
   ScaleDownSchedule:
     Type: AWS::Events::Rule
     Properties:
-      ScheduleExpression: rate(1 minute)
+      ScheduleExpression: rate(5 minutes)
       State: ENABLED
       Targets:
         - Arn: !GetAtt OrchestratorFunction.Arn
@@ -172,7 +173,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: control_plane.backends.aws.handlers.orchestrator_handler
-      CodeUri: control_plane/
+      CodeUri: ./
       Timeout: 900
       MemorySize: 256
       Environment:
@@ -203,7 +204,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: control_plane.backends.aws.handlers.router_handler
-      CodeUri: control_plane/
+      CodeUri: ./
       Timeout: 30
       Environment:
         Variables:
@@ -239,9 +240,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: control_plane.backends.aws.handlers.authorizer_handler
-      CodeUri: control_plane/
-      Timeout: 5
-      MemorySize: 128
+      CodeUri: ./
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ApiKeysTable
@@ -250,7 +249,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: control_plane.backends.aws.handlers.keys_handler
-      CodeUri: control_plane/
+      CodeUri: ./
       Timeout: 10
       MemorySize: 128
       Policies:
@@ -280,7 +279,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: control_plane.backends.aws.handlers.cluster_handler
-      CodeUri: control_plane/
+      CodeUri: ./
       Timeout: 10
       MemorySize: 128
       Environment:

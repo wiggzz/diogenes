@@ -9,7 +9,7 @@ setup-dev:
 	uv sync --project control_plane --extra dev
 
 sync-requirements:
-	uv export --project control_plane --no-dev --no-hashes --no-header --output-file control_plane/requirements.txt
+	uv export --project control_plane --no-dev --no-hashes --no-header --output-file requirements.txt
 
 ami-build:
 	./ami/imagebuilder.sh build

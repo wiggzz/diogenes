@@ -18,6 +18,7 @@ set -euo pipefail
 #   GPU_AMI_ID (skip AMI lookup/build if set)
 #   GPU_SUBNET_ID (auto-selected if unset)
 #   GPU_SECURITY_GROUP_ID (auto-selected if unset)
+#   DEPLOY_DEFAULTS_FILE (default: .diogenes/deploy-<region>-<stack>.env)
 #   ALLOWED_EMAILS
 #   GOOGLE_CLIENT_ID
 #   AMI_BUILD_MODE (auto|latest|build, default: auto)
@@ -39,6 +40,7 @@ AWS_REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
 STACK_NAME="${STACK_NAME:-diogenes}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 AMI_BUILD_MODE="${AMI_BUILD_MODE:-auto}"
+DEPLOY_DEFAULTS_FILE="${DEPLOY_DEFAULTS_FILE:-.diogenes/deploy-${AWS_REGION}-${STACK_NAME}.env}"
 
 if [[ -z "${AWS_REGION}" ]]; then
   echo "AWS region is not set. Set AWS_REGION or configure a default AWS region." >&2
@@ -107,6 +109,23 @@ resolve_security_group_id() {
   return 1
 }
 
+load_pinned_defaults() {
+  if [[ -f "${DEPLOY_DEFAULTS_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${DEPLOY_DEFAULTS_FILE}"
+    echo "Loaded pinned deploy defaults from ${DEPLOY_DEFAULTS_FILE}"
+  fi
+}
+
+save_pinned_defaults() {
+  mkdir -p "$(dirname "${DEPLOY_DEFAULTS_FILE}")"
+  cat > "${DEPLOY_DEFAULTS_FILE}" <<EOF
+GPU_SUBNET_ID=${GPU_SUBNET_ID}
+GPU_SECURITY_GROUP_ID=${GPU_SECURITY_GROUP_ID}
+EOF
+  echo "Saved pinned deploy defaults to ${DEPLOY_DEFAULTS_FILE}"
+}
+
 latest_pipeline_ami() {
   AWS_REGION="${AWS_REGION}" \
   AMI_PIPELINE_STACK="${AMI_PIPELINE_STACK:-diogenes-ami-pipeline}" \
@@ -151,6 +170,9 @@ if [[ -z "${GPU_AMI_ID:-}" ]]; then
   esac
 fi
 
+# Load pinned network defaults before attempting auto-discovery.
+load_pinned_defaults
+
 if [[ -z "${GPU_SUBNET_ID:-}" ]]; then
   if GPU_SUBNET_ID="$(resolve_subnet_id)"; then
     echo "Auto-selected GPU_SUBNET_ID=${GPU_SUBNET_ID}"
@@ -175,13 +197,15 @@ if [[ -z "${GPU_SECURITY_GROUP_ID:-}" ]]; then
   fi
 fi
 
+save_pinned_defaults
+
 echo "Using AWS_REGION=${AWS_REGION}"
 echo "Using STACK_NAME=${STACK_NAME}"
 echo "Using GpuAmiId=${GPU_AMI_ID}"
 echo "Using GpuSubnetId=${GPU_SUBNET_ID}"
 echo "Using GpuSecurityGroupId=${GPU_SECURITY_GROUP_ID}"
 
-uv export --project control_plane --no-dev --no-hashes --no-header --output-file control_plane/requirements.txt
+uv export --project control_plane --no-dev --no-hashes --no-header --output-file requirements.txt
 sam build
 
 param_overrides=(

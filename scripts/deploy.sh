@@ -130,7 +130,6 @@ latest_pipeline_ami() {
   AWS_REGION="${AWS_REGION}" \
   AMI_PIPELINE_STACK="${AMI_PIPELINE_STACK:-diogenes-ami-pipeline}" \
   AMI_PIPELINE_ENV="${AMI_PIPELINE_ENV:-dev}" \
-  IMAGE_VERSION="${IMAGE_VERSION:-1.0.2}" \
   ./ami/imagebuilder.sh latest
 }
 
@@ -141,8 +140,6 @@ build_pipeline_ami() {
   BASE_AMI_ID="${BASE_AMI_ID:-}" \
   BUILDER_SUBNET_ID="${BUILDER_SUBNET_ID:-}" \
   BUILDER_SECURITY_GROUP_ID="${BUILDER_SECURITY_GROUP_ID:-}" \
-  BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-t3.small}" \
-  IMAGE_VERSION="${IMAGE_VERSION:-1.0.2}" \
   PIPELINE_STATUS="${PIPELINE_STATUS:-DISABLED}" \
   ./ami/imagebuilder.sh build
 }

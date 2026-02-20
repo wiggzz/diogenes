@@ -83,7 +83,7 @@ def scale_up(
     placeholder["provider_instance_id"] = provider_instance_id
     placeholder["ip"] = ip
 
-    healthy = poll_health(ip, VLLM_PORT)
+    healthy = poll_health(ip, VLLM_PORT, timeout=1200)
     if healthy:
         state.update_instance(placeholder_id, status="ready")
         placeholder["status"] = "ready"

@@ -52,9 +52,9 @@ class EC2ComputeBackend:
 
         instance = resp["Instances"][0]
         instance_id = instance["InstanceId"]
-        # Private IP may not be immediately available; caller should poll
-        private_ip = instance.get("PrivateIpAddress", "")
-        return instance_id, private_ip
+        # Public IP used since Lambda runs outside the VPC
+        public_ip = instance.get("PublicIpAddress", "")
+        return instance_id, public_ip
 
     def terminate(self, instance_id: str) -> None:
         self._ec2.terminate_instances(InstanceIds=[instance_id])

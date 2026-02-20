@@ -16,11 +16,11 @@ Parameters:
     Description: Security group for Image Builder temporary instances
   BuilderInstanceType:
     Type: String
-    Default: t3.small
-    Description: Instance type used by Image Builder during AMI creation
+    Default: c5.2xlarge
+    Description: Instance type used by Image Builder during AMI creation (needs network bandwidth for large downloads)
   ImageVersion:
     Type: String
-    Default: 1.0.2
+    Default: 1.0.3
     Description: Semantic version for Image Builder component/recipe (bump on recipe changes)
   PipelineStatus:
     Type: String
@@ -28,6 +28,14 @@ Parameters:
     AllowedValues:
       - ENABLED
       - DISABLED
+  PrimaryModelId:
+    Type: String
+    Default: Qwen/Qwen2.5-Coder-32B-Instruct
+    Description: Large coding model to pre-download into the AMI
+  SmallModelId:
+    Type: String
+    Default: Qwen/Qwen2.5-0.5B-Instruct
+    Description: Small fast model to pre-download into the AMI
 
 Resources:
   ImageBuilderRole:
@@ -58,8 +66,8 @@ Resources:
       Name: !Sub diogenes-setup-${Environment}
       Platform: Linux
       Version: !Ref ImageVersion
-      Description: Install Docker + NVIDIA container runtime and register vLLM service
-      Data: |
+      Description: Install Docker + NVIDIA container runtime, pre-pull vLLM image, pre-download models
+      Data: !Sub |
         name: DiogenesSetup
         description: Install runtime dependencies for Diogenes GPU nodes.
         schemaVersion: 1.0
@@ -72,7 +80,7 @@ Resources:
                   commands:
                     - |
                       set -euxo pipefail
-                      trap 'echo "FAILED at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
+                      trap 'echo "FAILED at line ${!LINENO}: ${!BASH_COMMAND}" >&2' ERR
                       export DEBIAN_FRONTEND=noninteractive
                       apt-get update -y
                       apt-get install -y --no-install-recommends ca-certificates curl git jq python3 python3-pip python3-venv gnupg
@@ -90,6 +98,18 @@ Resources:
                         nvidia-ctk runtime configure --runtime=docker || true
                       fi
                       systemctl restart docker || true
+
+                      # Pre-pull the vLLM Docker image (saves ~10 min on every cold start)
+                      docker pull vllm/vllm-openai:latest
+
+                      # Pre-download model weights into /opt/models so cold starts don't need HuggingFace
+                      pip3 install -q huggingface-hub
+                      mkdir -p /opt/models
+                      echo "Downloading primary model: ${PrimaryModelId}"
+                      HF_HOME=/opt/models python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${PrimaryModelId}')"
+                      echo "Downloading small model: ${SmallModelId}"
+                      HF_HOME=/opt/models python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${SmallModelId}')"
+
                       cat > /etc/diogenes-model.env <<'EOF'
                       MODEL_NAME=
                       VLLM_ARGS=
@@ -99,16 +119,18 @@ Resources:
                       #!/usr/bin/env bash
                       set -euo pipefail
                       source /etc/diogenes-model.env
-                      if [[ -z "${MODEL_NAME:-}" ]]; then
+                      if [[ -z "${!MODEL_NAME:-}" ]]; then
                         echo "MODEL_NAME is required in /etc/diogenes-model.env"
                         exit 1
                       fi
                       exec docker run --rm --gpus all --network host \
-                        -e HUGGING_FACE_HUB_TOKEN="${HUGGING_FACE_HUB_TOKEN:-}" \
+                        -v /opt/models:/opt/models \
+                        -e HF_HOME=/opt/models \
+                        -e HUGGING_FACE_HUB_TOKEN="${!HUGGING_FACE_HUB_TOKEN:-}" \
                         vllm/vllm-openai:latest \
                         --model "$MODEL_NAME" \
                         --host 0.0.0.0 --port 8000 \
-                        ${VLLM_ARGS:-}
+                        ${!VLLM_ARGS:-}
                       EOF
                       chmod +x /opt/diogenes/start_vllm.sh
                       cat > /etc/systemd/system/vllm.service <<'EOF'
@@ -127,7 +149,6 @@ Resources:
                       WantedBy=multi-user.target
                       EOF
                       systemctl daemon-reload
-                      systemctl enable vllm.service
                       echo "DIOGENES_BOOTSTRAP_DONE" > /var/log/diogenes-bootstrap.done
 
   DiogenesImageRecipe:
@@ -136,6 +157,12 @@ Resources:
       Name: !Sub diogenes-gpu-recipe-${Environment}
       Version: !Ref ImageVersion
       ParentImage: !Ref BaseAmiId
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 250
+            VolumeType: gp3
+            DeleteOnTermination: true
       Components:
         - ComponentArn: !Ref DiogenesSetupComponent
 

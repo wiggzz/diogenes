@@ -265,8 +265,6 @@ Resources:
     Properties:
       Handler: control_plane.backends.aws.handlers.keys_handler
       CodeUri: ./
-      Timeout: 10
-      MemorySize: 128
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ApiKeysTable
@@ -295,8 +293,6 @@ Resources:
     Properties:
       Handler: control_plane.backends.aws.handlers.cluster_handler
       CodeUri: ./
-      Timeout: 10
-      MemorySize: 128
       Environment:
         Variables:
           ORCHESTRATOR_FUNCTION_NAME: !Ref OrchestratorFunction

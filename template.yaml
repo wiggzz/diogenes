@@ -22,10 +22,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Subnet ID for GPU instances
-  GpuSecurityGroupId:
+  GpuVpcId:
     Type: String
     Default: ""
-    Description: Security group ID for GPU instances
+    Description: VPC ID for GPU instances (a security group is created by this stack)
 
 Globals:
   Function:
@@ -147,6 +147,21 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt ScaleDownSchedule.Arn
 
+  # --- GPU Security Group ---
+  GpuSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "Diogenes GPU instances (${Environment})"
+      VpcId: !Ref GpuVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "diogenes-gpu-${Environment}"
+
   # --- GPU Instance IAM ---
   GpuInstanceRole:
     Type: AWS::IAM::Role
@@ -180,7 +195,7 @@ Resources:
         Variables:
           GPU_AMI_ID: !Ref GpuAmiId
           GPU_SUBNET_ID: !Ref GpuSubnetId
-          GPU_SECURITY_GROUP_ID: !Ref GpuSecurityGroupId
+          GPU_SECURITY_GROUP_ID: !GetAtt GpuSecurityGroup.GroupId
           GPU_INSTANCE_PROFILE_ARN: !GetAtt GpuInstanceProfile.Arn
       Policies:
         - DynamoDBCrudPolicy:

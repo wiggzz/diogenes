@@ -82,33 +82,6 @@ resolve_vpc_for_subnet() {
     --output text
 }
 
-resolve_security_group_id() {
-  local sg_id
-  sg_id="$(
-    aws ec2 describe-security-groups \
-      --region "${AWS_REGION}" \
-      --filters "Name=vpc-id,Values=${vpc_id}" "Name=group-name,Values=default" \
-      --query "SecurityGroups[0].GroupId" \
-      --output text 2>/dev/null || true
-  )"
-  if [[ -n "${sg_id}" && "${sg_id}" != "None" ]]; then
-    echo "${sg_id}"
-    return 0
-  fi
-  sg_id="$(
-    aws ec2 describe-security-groups \
-      --region "${AWS_REGION}" \
-      --filters "Name=vpc-id,Values=${vpc_id}" \
-      --query "SecurityGroups[0].GroupId" \
-      --output text 2>/dev/null || true
-  )"
-  if [[ -n "${sg_id}" && "${sg_id}" != "None" ]]; then
-    echo "${sg_id}"
-    return 0
-  fi
-  return 1
-}
-
 load_pinned_defaults() {
   if [[ -f "${DEPLOY_DEFAULTS_FILE}" ]]; then
     # shellcheck disable=SC1090
@@ -121,7 +94,6 @@ save_pinned_defaults() {
   mkdir -p "$(dirname "${DEPLOY_DEFAULTS_FILE}")"
   cat > "${DEPLOY_DEFAULTS_FILE}" <<EOF
 GPU_SUBNET_ID=${GPU_SUBNET_ID}
-GPU_SECURITY_GROUP_ID=${GPU_SECURITY_GROUP_ID}
 EOF
   echo "Saved pinned deploy defaults to ${DEPLOY_DEFAULTS_FILE}"
 }
@@ -185,22 +157,13 @@ if [[ -z "${vpc_id}" || "${vpc_id}" == "None" ]]; then
   exit 1
 fi
 
-if [[ -z "${GPU_SECURITY_GROUP_ID:-}" ]]; then
-  if GPU_SECURITY_GROUP_ID="$(resolve_security_group_id)"; then
-    echo "Auto-selected GPU_SECURITY_GROUP_ID=${GPU_SECURITY_GROUP_ID} (vpc=${vpc_id})"
-  else
-    echo "Unable to auto-discover GPU_SECURITY_GROUP_ID for VPC ${vpc_id}" >&2
-    exit 1
-  fi
-fi
-
 save_pinned_defaults
 
 echo "Using AWS_REGION=${AWS_REGION}"
 echo "Using STACK_NAME=${STACK_NAME}"
 echo "Using GpuAmiId=${GPU_AMI_ID}"
 echo "Using GpuSubnetId=${GPU_SUBNET_ID}"
-echo "Using GpuSecurityGroupId=${GPU_SECURITY_GROUP_ID}"
+echo "Using GpuVpcId=${vpc_id}"
 
 uv export --project control_plane --no-dev --no-hashes --no-header --output-file requirements.txt
 sam build
@@ -209,7 +172,7 @@ param_overrides=(
   "Environment=${ENVIRONMENT}"
   "GpuAmiId=${GPU_AMI_ID}"
   "GpuSubnetId=${GPU_SUBNET_ID}"
-  "GpuSecurityGroupId=${GPU_SECURITY_GROUP_ID}"
+  "GpuVpcId=${vpc_id}"
 )
 
 if [[ -n "${ALLOWED_EMAILS:-}" ]]; then

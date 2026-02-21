@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev sync-requirements ami-build ami-build-deploy ami-build-start ami-build-latest test test-unit test-e2e build deploy validate clean
+.PHONY: setup setup-dev sync-requirements ami-build ami-build-deploy ami-build-start ami-build-latest test test-unit test-e2e build deploy validate clean seed-models create-api-key
 
 STACK_NAME ?= diogenes
 
@@ -39,6 +39,13 @@ deploy:
 
 validate:
 	sam validate
+
+seed-models:
+	AWS_REGION="$(AWS_REGION)" uv run --project control_plane --no-sync python scripts/seed_models.py
+
+create-api-key:
+	@test -n "$(EMAIL)" || (echo "Usage: make create-api-key EMAIL=you@example.com" && exit 1)
+	AWS_REGION="$(AWS_REGION)" uv run --project control_plane --no-sync python scripts/create_api_key.py --email "$(EMAIL)"
 
 clean:
 	rm -rf .aws-sam/

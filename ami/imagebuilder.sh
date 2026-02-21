@@ -41,7 +41,7 @@ cmd="${1:-build}"
 AMI_PIPELINE_STACK="${AMI_PIPELINE_STACK:-diogenes-ami-pipeline}"
 AMI_PIPELINE_ENV="${AMI_PIPELINE_ENV:-dev}"
 BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-c5.2xlarge}"
-IMAGE_VERSION="${IMAGE_VERSION:-1.0.3}"
+IMAGE_VERSION="${IMAGE_VERSION:-1.0.4}"
 PIPELINE_STATUS="${PIPELINE_STATUS:-DISABLED}"
 TEMPLATE_FILE="${TEMPLATE_FILE:-ami/imagebuilder-template.yaml}"
 PRIMARY_MODEL_ID="${PRIMARY_MODEL_ID:-Qwen/Qwen2.5-Coder-32B-Instruct}"
@@ -50,7 +50,7 @@ SMALL_MODEL_ID="${SMALL_MODEL_ID:-Qwen/Qwen2.5-0.5B-Instruct}"
 default_base_ami_for_region() {
   case "$1" in
     ap-southeast-2) echo "ami-021000ae4658b3c28" ;;
-    us-east-2)      echo "ami-04a131f50a7b86648" ;;
+    us-east-2)      echo "ami-0600d0aaccc95db72" ;;
     us-west-2)      echo "ami-0a08f4510bfe41148" ;;
     *) echo "" ;;
   esac

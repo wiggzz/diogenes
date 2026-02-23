@@ -20,7 +20,7 @@ Parameters:
     Description: Instance type used by Image Builder during AMI creation (needs network bandwidth for large downloads)
   ImageVersion:
     Type: String
-    Default: 1.0.4
+    Default: 1.0.5
     Description: Semantic version for Image Builder component/recipe (bump on recipe changes)
   PipelineStatus:
     Type: String
@@ -126,6 +126,7 @@ Resources:
                       exec docker run --rm --gpus all --network host \
                         -v /opt/models:/opt/models \
                         -e HF_HOME=/opt/models \
+                        -e LD_LIBRARY_PATH=/lib/x86_64-linux-gnu \
                         -e HUGGING_FACE_HUB_TOKEN="${!HUGGING_FACE_HUB_TOKEN:-}" \
                         vllm/vllm-openai:latest \
                         --model "$MODEL_NAME" \

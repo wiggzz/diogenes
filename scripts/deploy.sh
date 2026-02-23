@@ -47,6 +47,8 @@ if [[ -z "${AWS_REGION}" ]]; then
   exit 1
 fi
 
+echo "Using AWS_REGION=${AWS_REGION}"
+
 resolve_subnet_id() {
   local subnet_id
   subnet_id="$(
@@ -165,7 +167,6 @@ fi
 
 save_pinned_defaults
 
-echo "Using AWS_REGION=${AWS_REGION}"
 echo "Using STACK_NAME=${STACK_NAME}"
 echo "Using GpuAmiId=${GPU_AMI_ID}"
 echo "Using GpuSubnetId=${GPU_SUBNET_ID}"

@@ -195,7 +195,7 @@ get_pipeline_arn() {
     --region "${AWS_REGION}" \
     --stack-name "${AMI_PIPELINE_STACK}" \
     --query "Stacks[0].Outputs[?OutputKey=='ImagePipelineArn'].OutputValue | [0]" \
-    --output text
+    --output text 2>/dev/null || echo ""
 }
 
 wait_for_build() {

@@ -58,11 +58,11 @@ class EC2ComputeBackend:
         # Public IP is used since Lambda runs outside the VPC.
         # It may not be present in the run_instances response yet, so poll
         # describe_instances until it appears (usually within a few seconds).
+        import time
         public_ip = instance.get("PublicIpAddress", "")
         if not public_ip:
-            import time
-            for _ in range(20):
-                time.sleep(3)
+            for _ in range(10):
+                time.sleep(2)
                 desc = self._ec2.describe_instances(InstanceIds=[instance_id])
                 public_ip = desc["Reservations"][0]["Instances"][0].get("PublicIpAddress", "")
                 if public_ip:

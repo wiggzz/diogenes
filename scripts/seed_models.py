@@ -17,13 +17,13 @@ DEFAULT_MODELS = [
     {
         "name": "Qwen/Qwen2.5-Coder-32B-Instruct",
         "instance_type": "g5.12xlarge",
-        "vllm_args": "--tensor-parallel-size 4 --max-model-len 32768",
+        "vllm_args": "--tensor-parallel-size 4 --max-model-len 32768 --enable-auto-tool-choice --tool-call-parser hermes",
         "idle_timeout": 300,
     },
     {
         "name": "Qwen/Qwen2.5-0.5B-Instruct",
         "instance_type": "g5.xlarge",
-        "vllm_args": "--max-model-len 32768",
+        "vllm_args": "--max-model-len 32768 --enable-auto-tool-choice --tool-call-parser hermes",
         "idle_timeout": 300,
     },
 ]

@@ -91,7 +91,7 @@ def scale_up(
         healthy = False
 
     if healthy:
-        state.update_instance(placeholder_id, status="ready")
+        state.update_instance(placeholder_id, status="ready", last_request_at=int(time.time()))
         placeholder["status"] = "ready"
         logger.info("Instance %s is ready", provider_instance_id)
     else:

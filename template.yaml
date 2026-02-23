@@ -26,6 +26,11 @@ Parameters:
     Type: String
     Default: ""
     Description: VPC ID for GPU instances (a security group is created by this stack)
+  VllmApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Shared secret required by vLLM (--api-key) and forwarded by the router
 
 Globals:
   Function:
@@ -197,6 +202,7 @@ Resources:
           GPU_SUBNET_ID: !Ref GpuSubnetId
           GPU_SECURITY_GROUP_ID: !GetAtt GpuSecurityGroup.GroupId
           GPU_INSTANCE_PROFILE_ARN: !GetAtt GpuInstanceProfile.Arn
+          VLLM_API_KEY: !Ref VllmApiKey
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref InstancesTable
@@ -224,6 +230,7 @@ Resources:
       Environment:
         Variables:
           ORCHESTRATOR_FUNCTION_NAME: !Ref OrchestratorFunction
+          VLLM_API_KEY: !Ref VllmApiKey
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref InstancesTable

@@ -94,6 +94,7 @@ save_pinned_defaults() {
   mkdir -p "$(dirname "${DEPLOY_DEFAULTS_FILE}")"
   cat > "${DEPLOY_DEFAULTS_FILE}" <<EOF
 GPU_SUBNET_ID=${GPU_SUBNET_ID}
+VLLM_API_KEY=${VLLM_API_KEY}
 EOF
   echo "Saved pinned deploy defaults to ${DEPLOY_DEFAULTS_FILE}"
 }
@@ -157,6 +158,11 @@ if [[ -z "${vpc_id}" || "${vpc_id}" == "None" ]]; then
   exit 1
 fi
 
+if [[ -z "${VLLM_API_KEY:-}" ]]; then
+  VLLM_API_KEY="$(openssl rand -hex 32)"
+  echo "Generated new VLLM_API_KEY"
+fi
+
 save_pinned_defaults
 
 echo "Using AWS_REGION=${AWS_REGION}"
@@ -180,6 +186,9 @@ if [[ -n "${ALLOWED_EMAILS:-}" ]]; then
 fi
 if [[ -n "${GOOGLE_CLIENT_ID:-}" ]]; then
   param_overrides+=("GoogleClientId=${GOOGLE_CLIENT_ID}")
+fi
+if [[ -n "${VLLM_API_KEY:-}" ]]; then
+  param_overrides+=("VllmApiKey=${VLLM_API_KEY}")
 fi
 
 sam deploy \

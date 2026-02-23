@@ -12,6 +12,7 @@ class EC2ComputeBackend:
         security_group_id: str,
         subnet_id: str,
         instance_profile_arn: str,
+        vllm_api_key: str = "",
         endpoint_url: str | None = None,
     ):
         kwargs = {}
@@ -22,6 +23,7 @@ class EC2ComputeBackend:
         self._security_group_id = security_group_id
         self._subnet_id = subnet_id
         self._instance_profile_arn = instance_profile_arn
+        self._vllm_api_key = vllm_api_key
 
     def launch(self, model_config: dict) -> tuple[str, str]:
         """Launch an EC2 GPU instance for the given model config.
@@ -52,8 +54,20 @@ class EC2ComputeBackend:
 
         instance = resp["Instances"][0]
         instance_id = instance["InstanceId"]
-        # Public IP used since Lambda runs outside the VPC
+
+        # Public IP is used since Lambda runs outside the VPC.
+        # It may not be present in the run_instances response yet, so poll
+        # describe_instances until it appears (usually within a few seconds).
         public_ip = instance.get("PublicIpAddress", "")
+        if not public_ip:
+            import time
+            for _ in range(20):
+                time.sleep(3)
+                desc = self._ec2.describe_instances(InstanceIds=[instance_id])
+                public_ip = desc["Reservations"][0]["Instances"][0].get("PublicIpAddress", "")
+                if public_ip:
+                    break
+
         return instance_id, public_ip
 
     def terminate(self, instance_id: str) -> None:
@@ -62,6 +76,8 @@ class EC2ComputeBackend:
     def _build_user_data(self, model_config: dict) -> str:
         """Build the cloud-init script that starts vLLM."""
         vllm_args = model_config.get("vllm_args", "")
+        if self._vllm_api_key:
+            vllm_args = f"{vllm_args} --api-key {self._vllm_api_key}".strip()
         return f"""#!/bin/bash
 set -euo pipefail
 

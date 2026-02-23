@@ -36,6 +36,7 @@ def _get_state_store():
 
 def _get_compute_backend():
     """Build an EC2ComputeBackend from environment variables."""
+    import os
     from control_plane.shared.config import get_env
     from control_plane.backends.aws.compute import EC2ComputeBackend
 
@@ -44,6 +45,7 @@ def _get_compute_backend():
         security_group_id=get_env("GPU_SECURITY_GROUP_ID"),
         subnet_id=get_env("GPU_SUBNET_ID"),
         instance_profile_arn=get_env("GPU_INSTANCE_PROFILE_ARN"),
+        vllm_api_key=os.environ.get("VLLM_API_KEY", ""),
     )
 
 
@@ -114,6 +116,7 @@ def router_handler(event, context):
         return _api_response(200, result)
 
     if method == "POST" and path in ("/v1/chat/completions", "/v1/completions"):
+        import os
         body = json.loads(event.get("body", "{}"))
         trigger = _make_trigger_scale_up()
         result = handle_inference(
@@ -122,6 +125,7 @@ def router_handler(event, context):
             path=path,
             state=state,
             trigger_scale_up=trigger,
+            vllm_api_key=os.environ.get("VLLM_API_KEY", ""),
         )
         return _api_response(
             result["status_code"],

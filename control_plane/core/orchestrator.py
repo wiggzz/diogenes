@@ -21,6 +21,7 @@ def scale_up(
     model_name: str,
     state: StateStore,
     compute: ComputeBackend,
+    vllm_api_key: str = "",
 ) -> dict:
     """Launch a GPU instance for the given model (idempotent).
 
@@ -84,7 +85,7 @@ def scale_up(
     placeholder["ip"] = ip
 
     try:
-        healthy = poll_health(ip, VLLM_PORT, timeout=800)
+        healthy = poll_health(ip, VLLM_PORT, timeout=800, api_key=vllm_api_key)
     except Exception:
         logger.exception("poll_health raised for %s, terminating", provider_instance_id)
         healthy = False
@@ -141,16 +142,19 @@ def poll_health(
     port: int = VLLM_PORT,
     timeout: int = 600,
     interval: int = 10,
+    api_key: str = "",
 ) -> bool:
     """Poll an instance's health endpoint until it responds 200 or times out."""
     url = f"http://{ip}:{port}/health"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     deadline = time.time() + timeout
 
     while time.time() < deadline:
         try:
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:
                 return True
+            logger.debug("poll_health got %s from %s", resp.status_code, url)
         except requests.RequestException:
             pass
         time.sleep(interval)

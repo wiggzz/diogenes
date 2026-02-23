@@ -86,8 +86,9 @@ def orchestrator_handler(event, context):
     action = event.get("action", "")
 
     if action == "scale_up":
+        import os
         model_name = event["model"]
-        result = scale_up(model_name, state, compute)
+        result = scale_up(model_name, state, compute, vllm_api_key=os.environ.get("VLLM_API_KEY", ""))
         return {"statusCode": 200, "body": json.dumps(result, default=_json_default)}
 
     elif action == "scale_down" or event.get("source") in ("schedule", "aws.events"):

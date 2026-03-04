@@ -226,7 +226,7 @@ Resources:
     Properties:
       Handler: control_plane.backends.aws.handlers.router_handler
       CodeUri: ./
-      Timeout: 30
+      Timeout: 120
       Environment:
         Variables:
           ORCHESTRATOR_FUNCTION_NAME: !Ref OrchestratorFunction

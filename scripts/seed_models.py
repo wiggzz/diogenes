@@ -15,15 +15,15 @@ if str(REPO_ROOT) not in sys.path:
 
 DEFAULT_MODELS = [
     {
-        "name": "Qwen/Qwen2.5-Coder-32B-Instruct",
-        "instance_type": "g5.12xlarge",
-        "vllm_args": "--tensor-parallel-size 4 --max-model-len 32768 --enable-auto-tool-choice --tool-call-parser hermes",
+        "name": "Qwen/Qwen3.5-9B",
+        "instance_type": "g5.xlarge",
+        "vllm_args": "--max-model-len 16384 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder",
         "idle_timeout": 300,
     },
     {
-        "name": "Qwen/Qwen2.5-0.5B-Instruct",
+        "name": "Qwen/Qwen3.5-0.8B",
         "instance_type": "g5.xlarge",
-        "vllm_args": "--max-model-len 32768 --enable-auto-tool-choice --tool-call-parser hermes",
+        "vllm_args": "--max-model-len 32768 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder",
         "idle_timeout": 300,
     },
 ]

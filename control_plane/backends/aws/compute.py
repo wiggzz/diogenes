@@ -99,12 +99,14 @@ class EC2ComputeBackend:
         vllm_args = model_config.get("vllm_args", "")
         if self._vllm_api_key:
             vllm_args = f"{vllm_args} --api-key {self._vllm_api_key}".strip()
+        # model_id is the HuggingFace path for vLLM; falls back to name.
+        model_id = model_config.get("model_id") or model_config["name"]
         return f"""#!/bin/bash
 set -euo pipefail
 
 # Write model config
 cat > /etc/diogenes-model.env << 'MODELEOF'
-MODEL_NAME={model_config['name']}
+MODEL_NAME={model_id}
 VLLM_ARGS="{vllm_args}"
 MODELEOF
 

@@ -1,6 +1,10 @@
-.PHONY: setup setup-dev sync-requirements ami-build ami-build-deploy ami-build-start ami-build-latest test test-unit test-e2e build deploy validate clean seed-models create-api-key
+.PHONY: setup setup-dev sync-requirements ami-build ami-build-deploy ami-build-start ami-build-latest test test-unit test-e2e build deploy validate clean seed-models create-api-key logs status
 
-STACK_NAME ?= diogenes
+STACK_NAME   ?= diogenes
+ENVIRONMENT  ?= dev
+AWS_REGION   ?= $(shell aws configure get region 2>/dev/null)
+MODEL        ?=
+LINES        ?= 60
 
 setup:
 	uv sync
@@ -46,6 +50,12 @@ seed-models:
 create-api-key:
 	@test -n "$(EMAIL)" || (echo "Usage: make create-api-key EMAIL=you@example.com" && exit 1)
 	AWS_REGION="$(AWS_REGION)" uv run --no-sync python scripts/create_api_key.py --email "$(EMAIL)"
+
+logs:
+	AWS_REGION="$(AWS_REGION)" ENVIRONMENT="$(ENVIRONMENT)" MODEL_FILTER="$(MODEL)" LINES="$(LINES)" ./scripts/instance-logs.sh
+
+status:
+	AWS_REGION="$(AWS_REGION)" ENVIRONMENT="$(ENVIRONMENT)" ./scripts/cluster-status.sh
 
 clean:
 	rm -rf .aws-sam/

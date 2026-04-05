@@ -47,11 +47,27 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service:
+                - ec2.amazonaws.com
+                - imagebuilder.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: LifecycleImageCleanup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeImages
+                  - ec2:DeregisterImage
+                  - ec2:DeleteSnapshot
+                  - ec2:DescribeSnapshots
+                  - imagebuilder:GetImage
+                  - imagebuilder:ListImagePipelineImages
+                Resource: "*"
 
   ImageBuilderInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -193,6 +209,24 @@ Resources:
       DistributionConfigurationArn: !Ref DiogenesDistributionConfig
       ImageTestsConfiguration:
         ImageTestsEnabled: false
+
+  DiogenesLifecyclePolicy:
+    Type: AWS::ImageBuilder::LifecyclePolicy
+    Properties:
+      Name: !Sub diogenes-ami-lifecycle-${Environment}
+      Status: ENABLED
+      ExecutionRole: !GetAtt ImageBuilderRole.Arn
+      ResourceType: AMI_IMAGE
+      ResourceSelection:
+        Recipes:
+          - Name: !Sub diogenes-gpu-recipe-${Environment}
+            SemanticVersion: "*.*.*"
+      PolicyDetails:
+        - Action:
+            Type: DELETE
+          Filter:
+            Type: COUNT
+            Value: 3
 
 Outputs:
   ImagePipelineArn:

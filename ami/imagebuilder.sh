@@ -381,6 +381,68 @@ print_latest_ami() {
   echo "${ami_id}"
 }
 
+prune_old_amis() {
+  local keep="${KEEP:-3}"
+  local pipeline_arn
+  pipeline_arn="$(get_pipeline_arn)"
+  if [[ -z "${pipeline_arn}" || "${pipeline_arn}" == "None" ]]; then
+    echo "ImagePipelineArn not found. Run deploy first." >&2
+    exit 1
+  fi
+
+  # All available images sorted oldest-first; skip the newest $keep, delete the rest
+  local all_arns
+  mapfile -t all_arns < <(
+    aws imagebuilder list-image-pipeline-images \
+      --region "${AWS_REGION}" \
+      --image-pipeline-arn "${pipeline_arn}" \
+      --query "sort_by(imageSummaryList[?state.status=='AVAILABLE'],&dateCreated)[*].arn" \
+      --output text | tr '\t' '\n'
+  )
+
+  local total="${#all_arns[@]}"
+  if [[ "${total}" -le "${keep}" ]]; then
+    echo "Only ${total} AMI(s) found, nothing to prune (keeping ${keep})."
+    return 0
+  fi
+
+  local to_delete=$(( total - keep ))
+  echo "Found ${total} AMIs. Keeping latest ${keep}, deleting ${to_delete}."
+
+  for i in $(seq 0 $(( to_delete - 1 ))); do
+    local image_arn="${all_arns[$i]}"
+    local ami_id
+    ami_id="$(aws imagebuilder get-image --region "${AWS_REGION}" \
+      --image-build-version-arn "${image_arn}" \
+      --query "image.outputResources.amis[0].image" --output text 2>/dev/null || true)"
+    if [[ -z "${ami_id}" || "${ami_id}" == "None" ]]; then
+      ami_id="$(aws imagebuilder get-image --region "${AWS_REGION}" \
+        --image-build-version-arn "${image_arn}" \
+        --query "image.outputResources.amis[0].imageId" --output text 2>/dev/null || true)"
+    fi
+
+    echo "Deleting image ${image_arn} (AMI: ${ami_id})..."
+
+    # Deregister the AMI and delete its snapshots
+    if [[ -n "${ami_id}" && "${ami_id}" != "None" ]]; then
+      local snapshot_ids
+      mapfile -t snapshot_ids < <(
+        aws ec2 describe-images --region "${AWS_REGION}" --image-ids "${ami_id}" \
+          --query "Images[0].BlockDeviceMappings[*].Ebs.SnapshotId" \
+          --output text | tr '\t' '\n' | grep -v "None" || true
+      )
+      aws ec2 deregister-image --region "${AWS_REGION}" --image-id "${ami_id}" && \
+        echo "  Deregistered AMI ${ami_id}"
+      for snap in "${snapshot_ids[@]}"; do
+        [[ -z "${snap}" ]] && continue
+        aws ec2 delete-snapshot --region "${AWS_REGION}" --snapshot-id "${snap}" && \
+          echo "  Deleted snapshot ${snap}"
+      done
+    fi
+  done
+  echo "Prune complete."
+}
+
 case "${cmd}" in
   deploy)
     deploy_pipeline_stack
@@ -395,9 +457,12 @@ case "${cmd}" in
     deploy_pipeline_stack
     start_pipeline_build
     ;;
+  prune)
+    prune_old_amis
+    ;;
   *)
     echo "Unknown command: ${cmd}" >&2
-    echo "Usage: $0 [deploy|start|latest|build]" >&2
+    echo "Usage: $0 [deploy|start|latest|build|prune]" >&2
     exit 1
     ;;
 esac

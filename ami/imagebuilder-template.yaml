@@ -20,7 +20,7 @@ Parameters:
     Description: Instance type used by Image Builder during AMI creation (needs network bandwidth for large downloads)
   ImageVersion:
     Type: String
-    Default: 1.3.2
+    Default: 1.3.3
     Description: Semantic version for Image Builder component/recipe (bump on recipe changes)
   PipelineStatus:
     Type: String
@@ -133,7 +133,8 @@ Resources:
                         -DCMAKE_BUILD_TYPE=Release \
                         -G Ninja
                       cmake --build build --config Release -j$(nproc) --target llama-server
-                      install -m 0755 build/bin/llama-server /usr/local/bin/llama-server
+                      cmake --install build --prefix /usr/local
+                      ldconfig
                       cd / && rm -rf /tmp/llama.cpp
 
                       # Install huggingface-hub for model downloads

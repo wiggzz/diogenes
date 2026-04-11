@@ -37,6 +37,42 @@ DEFAULT_MODELS = [
 ]
 
 
+_VLLM_ONLY_FLAGS = {
+    "--max-model-len",
+    "--reasoning-parser",
+    "--enable-auto-tool-choice",
+    "--tool-call-parser",
+    "--enforce-eager",
+    "--tensor-parallel-size",
+    "--dtype",
+    "--quantization",
+}
+
+
+def validate_model(model: dict) -> None:
+    """Raise ValueError if a model config looks wrong for llama-server."""
+    name = model.get("name", "?")
+
+    model_id = model.get("model_id") or model.get("name", "")
+    if not model_id.startswith("/"):
+        raise ValueError(
+            f"Model '{name}': model_id must be an absolute path to a GGUF file "
+            f"(e.g. /opt/models/foo.gguf), got: {model_id!r}"
+        )
+    if not model_id.endswith(".gguf"):
+        raise ValueError(
+            f"Model '{name}': model_id must point to a .gguf file, got: {model_id!r}"
+        )
+
+    server_args = model.get("vllm_args", "")
+    bad = [flag for flag in _VLLM_ONLY_FLAGS if flag in server_args]
+    if bad:
+        raise ValueError(
+            f"Model '{name}': vllm_args contains vLLM-only flag(s) not supported by "
+            f"llama-server: {bad}. Use llama-server flags like -ngl, --ctx-size, --jinja."
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Diogenes model configurations into DynamoDB")
     parser.add_argument(
@@ -57,6 +93,9 @@ def main() -> None:
     args = parser.parse_args()
 
     table_name = f"diogenes-models-{args.environment}"
+
+    for model in DEFAULT_MODELS:
+        validate_model(model)
 
     if args.dry_run:
         print(f"Would seed {len(DEFAULT_MODELS)} model(s) into {table_name}:")

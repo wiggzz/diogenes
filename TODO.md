@@ -114,6 +114,20 @@ when there's spare time.
 
 ---
 
+## UX / Client Experience
+
+- **Cold-start 503 message is a flat string** (`router.py:59`). The llama-server
+  `/health` endpoint returns `{"status": "loading model"}` while loading and
+  `{"status": "ok"}` when ready. Better approach:
+  1. In `check_health` (`orchestrator.py`), when an instance isn't ready, store the
+     raw `/health` response body as `status_message` on the DynamoDB instance record.
+  2. In `router.py`, read `starting_instances[0].get("status_message")` and include
+     it in the 503 body, falling back to a generic message.
+  This gives the client the actual llama-server phase ("loading model", "error", etc.)
+  without log parsing. The `Retry-After` header can also be tuned per-phase.
+
+---
+
 ## Observability / Operations
 
 - **No CloudWatch alarm on instance startup failures**. If `check_health` terminates

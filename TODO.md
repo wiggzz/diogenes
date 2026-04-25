@@ -229,6 +229,22 @@ when there's spare time.
   `llama_service_start`, and health status in DynamoDB so 503 responses can include
   accurate progress instead of a flat retry message.
 
+- **Needs vetting: increase Qwen 3.6 context window beyond 32k**. Startup logs at
+  `--ctx-size 32768` showed about 18,038 MiB projected GPU usage on A10G, with about
+  3,665 MiB projected free. KV cache was about 2,048 MiB at 32k, so 64k should add
+  roughly another 2 GiB and may fit on the current `g5.2xlarge`; 96k/128k likely need
+  either a smaller quant or more VRAM. First experiment: update only the model config
+  to `--ctx-size 65536`, cold-start a fresh instance, and verify llama-server fit/load
+  logs plus real prompt behavior.
+
+- **Needs vetting: more-VRAM instance options within a 32 vCPU budget**. Current
+  `g5.2xlarge` has one A10G-class GPU with 24 GB GPU memory and 8 vCPUs. AWS docs list
+  `g6e.xlarge`, `g6e.2xlarge`, `g6e.4xlarge`, and `g6e.8xlarge` as single L40S-class
+  GPU instances with 44 GiB accelerator memory and 4/8/16/32 vCPUs respectively.
+  These are the main candidates for larger context while staying inside 32 vCPUs.
+  Need to verify regional availability, quota, AMI driver compatibility, capacity,
+  price, and llama.cpp CUDA behavior before switching defaults.
+
 ---
 
 ## Simplifications

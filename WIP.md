@@ -124,6 +124,32 @@
 - Readiness is currently discovered by EventBridge polling, so DynamoDB can lag actual
   llama-server readiness by up to about 60 seconds.
 
+## Qwen 3.6 Memory / Context Notes
+
+- Current runtime args for 27B:
+  - `-ngl 99 --ctx-size 32768 --parallel 1 --jinja`
+- Startup memory logs at 32k context:
+  - GPU: NVIDIA A10G, about `22587 MiB` total VRAM.
+  - llama.cpp projected use: `18038 MiB` device memory.
+  - Projected free headroom: `3665 MiB`.
+  - GPU model buffer: `15345.66 MiB`.
+  - KV cache: `2048.00 MiB`.
+  - Recurrent/state buffer: `149.62 MiB`.
+  - CUDA compute buffer: `495.00 MiB`.
+- Rough context scaling:
+  - `64k` should add about `2 GiB` KV cache and may fit on the current A10G.
+  - `96k`/`128k` likely need a smaller quant or more VRAM.
+  - Full `262k` model context is not realistic on A10G for this 27B quant.
+- AWS more-VRAM options within 32 vCPUs to vet:
+  - `g6e.xlarge`: 4 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
+  - `g6e.2xlarge`: 8 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
+  - `g6e.4xlarge`: 16 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
+  - `g6e.8xlarge`: 32 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
+- Next suggested experiment:
+  - Try `--ctx-size 65536` on `Qwen/Qwen3.6-27B` with the current `g5.2xlarge`.
+  - If that is too tight or long-context usage is still poor, evaluate `g6e.2xlarge`
+    or `g6e.4xlarge` before jumping to `g6e.8xlarge`.
+
 ## Current Runtime Issue
 
 - User reported client-side errors:

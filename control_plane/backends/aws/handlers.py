@@ -51,6 +51,7 @@ def _get_compute_backend():
         subnet_id=get_env("GPU_SUBNET_ID"),
         instance_profile_arn=get_env("GPU_INSTANCE_PROFILE_ARN"),
         vllm_api_key=os.environ.get("VLLM_API_KEY", ""),
+        models_bucket=os.environ.get("MODELS_BUCKET", ""),
     )
 
 

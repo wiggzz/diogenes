@@ -18,6 +18,7 @@ class EC2ComputeBackend:
         subnet_id: str,
         instance_profile_arn: str,
         vllm_api_key: str = "",
+        models_bucket: str = "",
         endpoint_url: str | None = None,
     ):
         kwargs = {}
@@ -30,6 +31,7 @@ class EC2ComputeBackend:
         self._subnet_ids = [s.strip() for s in subnet_id.split(",") if s.strip()]
         self._instance_profile_arn = instance_profile_arn
         self._vllm_api_key = vllm_api_key
+        self._models_bucket = models_bucket
 
     def launch(self, model_config: dict) -> tuple[str, str]:
         """Launch an EC2 GPU instance for the given model config.
@@ -107,14 +109,28 @@ class EC2ComputeBackend:
         self._ec2.terminate_instances(InstanceIds=[instance_id])
 
     def _build_user_data(self, model_config: dict) -> str:
-        """Build the cloud-init script that starts vLLM."""
+        """Build the cloud-init script that starts llama-server."""
         vllm_args = model_config.get("vllm_args", "")
         if self._vllm_api_key:
             vllm_args = f"{vllm_args} --api-key {self._vllm_api_key}".strip()
-        # model_id is the HuggingFace path for vLLM; falls back to name.
         model_id = model_config.get("model_id") or model_config["name"]
         model_name = model_config.get("name", model_id)
         model_name_safe = model_name.replace("/", "_")
+
+        # If a models bucket and s3_key are present, download from S3 at boot.
+        # Writing fresh bytes to EBS runs at full provisioned throughput (1000 MB/s),
+        # bypassing the ~33 MB/s EBS snapshot lazy-initialization penalty.
+        s3_key = model_config.get("s3_key", "")
+        if self._models_bucket and s3_key:
+            fetch_model = (
+                f"echo 'Downloading {s3_key} from s3://{self._models_bucket}/...'\n"
+                f"mkdir -p /opt/models\n"
+                f"aws s3 cp s3://{self._models_bucket}/{s3_key} {model_id} --no-progress\n"
+                f"echo 'Download complete.'"
+            )
+        else:
+            fetch_model = f"# Model file expected at {model_id} (pre-baked in AMI)"
+
         return f"""#!/bin/bash
 set -euo pipefail
 
@@ -152,6 +168,8 @@ CWEOF
     -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json || true
 fi
 
-# Start vLLM (assumes AMI has vllm installed and systemd service configured)
+{fetch_model}
+
+# Start vLLM (assumes AMI has llama-server configured via systemd)
 systemctl start vllm
 """

@@ -20,7 +20,7 @@ Parameters:
     Description: Instance type used by Image Builder during AMI creation (needs network bandwidth for large downloads)
   ImageVersion:
     Type: String
-    Default: 1.3.7
+    Default: 1.3.9
     Description: Semantic version for Image Builder component/recipe (bump on recipe changes)
   PipelineStatus:
     Type: String
@@ -28,25 +28,6 @@ Parameters:
     AllowedValues:
       - ENABLED
       - DISABLED
-  # GGUF model repos and filenames for pre-downloading into the AMI.
-  # Find quantized GGUF uploads at https://huggingface.co/bartowski or the model author's page.
-  # Use Q4_K_M quantization for a good balance of quality and size.
-  PrimaryModelGgufRepo:
-    Type: String
-    Default: bartowski/Qwen_Qwen3.5-27B-GGUF
-    Description: HuggingFace repo containing the primary model GGUF file
-  PrimaryModelGgufFile:
-    Type: String
-    Default: Qwen_Qwen3.5-27B-Q4_K_M.gguf
-    Description: GGUF filename to download from the primary model repo
-  SmallModelGgufRepo:
-    Type: String
-    Default: bartowski/Qwen_Qwen3.5-4B-GGUF
-    Description: HuggingFace repo containing the small model GGUF file
-  SmallModelGgufFile:
-    Type: String
-    Default: Qwen_Qwen3.5-4B-Q4_K_M.gguf
-    Description: GGUF filename to download from the small model repo
 
 Resources:
   ImageBuilderRole:
@@ -93,10 +74,10 @@ Resources:
       Name: !Sub diogenes-setup-${Environment}
       Platform: Linux
       Version: !Ref ImageVersion
-      Description: Install vLLM directly via pip, CloudWatch agent, pre-download models
+      Description: Install llama.cpp (Docker), CloudWatch agent, NVIDIA toolkit. Models are downloaded from S3 at instance boot — not baked into the AMI.
       Data: !Sub |
         name: DiogenesSetup
-        description: Install llama.cpp server and pre-download GGUF models for Diogenes GPU nodes.
+        description: Install llama.cpp (Docker), CloudWatch agent, NVIDIA toolkit. Models downloaded from S3 at boot.
         schemaVersion: 1.0
         phases:
           - name: build
@@ -113,6 +94,15 @@ Resources:
                       apt-get install -y --no-install-recommends \
                         ca-certificates curl \
                         python3 python3-pip python3-venv
+
+                      # Disable Ubuntu background services that add 3-4 min to every boot.
+                      # This is a single-purpose inference node — package updates have no value here.
+                      systemctl disable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer apt-news.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+                      apt-get remove -y --purge unattended-upgrades 2>/dev/null || true
+                      # snapd can hold the dpkg lock and delay boot by 30-60s
+                      apt-get remove -y --purge snapd 2>/dev/null || true
+                      # PackageKit is a desktop package-management daemon — unused on a server
+                      apt-get remove -y --purge packagekit 2>/dev/null || true
 
                       # Install CloudWatch agent for persistent log streaming
                       curl -sO https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
@@ -132,16 +122,10 @@ Resources:
                       # server-cuda bundles CUDA libs — no compile step, no CPU arch mismatch.
                       docker pull ghcr.io/ggml-org/llama.cpp:server-cuda
 
-                      # Install huggingface-hub for model downloads
-                      pip3 install --quiet huggingface-hub
-
-                      # Pre-download GGUF model files into /opt/models
-                      # llama.cpp loads via mmap — files are read directly from disk.
+                      # Models are downloaded from S3 at instance boot (not baked into the AMI).
+                      # This avoids EBS snapshot lazy-initialization (~33 MB/s) by writing fresh
+                      # bytes to EBS at full provisioned throughput (~1000 MB/s).
                       mkdir -p /opt/models
-                      echo "Downloading primary model: ${PrimaryModelGgufRepo}/${PrimaryModelGgufFile}"
-                      python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='${PrimaryModelGgufRepo}', filename='${PrimaryModelGgufFile}', local_dir='/opt/models')"
-                      echo "Downloading small model: ${SmallModelGgufRepo}/${SmallModelGgufFile}"
-                      python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='${SmallModelGgufRepo}', filename='${SmallModelGgufFile}', local_dir='/opt/models')"
 
                       cat > /etc/diogenes-model.env <<'EOF'
                       MODEL_NAME=

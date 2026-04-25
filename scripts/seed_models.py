@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Seed default model configurations into the Diogenes DynamoDB models table."""
+"""Seed default model configurations into the Diogenes DynamoDB models table.
+
+Usage:
+  python3 scripts/seed_models.py                          # seed DynamoDB only
+  python3 scripts/seed_models.py --upload --bucket NAME   # download from HF, upload to S3, seed DynamoDB
+  python3 scripts/seed_models.py --dry-run                # print what would be seeded
+"""
 
 from __future__ import annotations
 
@@ -13,20 +19,28 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# Each model has:
+#   name         — canonical model name (used as DynamoDB key and in API requests)
+#   hf_repo      — HuggingFace repo to download the GGUF from
+#   hf_file      — filename within that repo
+#   model_id     — absolute path where the file will live on the GPU instance
+#   instance_type, vllm_args, idle_timeout — runtime config
 DEFAULT_MODELS = [
     {
         "name": "Qwen/Qwen3.5-27B",
-        # Path to the pre-downloaded GGUF file in the AMI (must match PrimaryModelGgufFile).
+        "hf_repo": "bartowski/Qwen_Qwen3.5-27B-GGUF",
+        "hf_file": "Qwen_Qwen3.5-27B-Q4_K_M.gguf",
         "model_id": "/opt/models/Qwen_Qwen3.5-27B-Q4_K_M.gguf",
         "instance_type": "g5.2xlarge",
         # llama-server flags: full GPU offload, 64k context, Jinja template for tool calling.
-        # --no-mmap is set globally in start_vllm.sh (sequential EBS read vs page-fault random I/O).
+        # --no-mmap forces sequential EBS reads vs page-fault random I/O.
         "vllm_args": "-ngl 99 --ctx-size 65536 --jinja",
         "idle_timeout": 300,
     },
     {
         "name": "Qwen/Qwen3.5-4B",
-        # Path to the pre-downloaded GGUF file in the AMI (must match SmallModelGgufFile).
+        "hf_repo": "bartowski/Qwen_Qwen3.5-4B-GGUF",
+        "hf_file": "Qwen_Qwen3.5-4B-Q4_K_M.gguf",
         "model_id": "/opt/models/Qwen_Qwen3.5-4B-Q4_K_M.gguf",
         "instance_type": "g5.xlarge",
         # llama-server flags: full GPU offload, 128k context, single slot (parallel 1 so full
@@ -35,7 +49,6 @@ DEFAULT_MODELS = [
         "idle_timeout": 300,
     },
 ]
-
 
 _VLLM_ONLY_FLAGS = {
     "--max-model-len",
@@ -73,6 +86,35 @@ def validate_model(model: dict) -> None:
         )
 
 
+def upload_model(model: dict, bucket: str, region: str | None) -> None:
+    """Download model from HuggingFace and upload to S3 if not already present."""
+    import boto3
+    from huggingface_hub import hf_hub_download
+
+    hf_repo = model["hf_repo"]
+    hf_file = model["hf_file"]
+    name = model["name"]
+
+    s3 = boto3.client("s3", region_name=region)
+
+    # Check if already uploaded — skip if so.
+    try:
+        s3.head_object(Bucket=bucket, Key=hf_file)
+        print(f"  {name}: s3://{bucket}/{hf_file} already exists, skipping upload")
+        return
+    except s3.exceptions.ClientError:
+        pass
+    except Exception:
+        pass
+
+    print(f"  {name}: downloading {hf_repo}/{hf_file} from HuggingFace...")
+    local_path = hf_hub_download(repo_id=hf_repo, filename=hf_file)
+    size_gb = Path(local_path).stat().st_size / 1024 ** 3
+    print(f"  {name}: uploading {size_gb:.1f} GB to s3://{bucket}/{hf_file}...")
+    s3.upload_file(local_path, bucket, hf_file)
+    print(f"  {name}: upload complete")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Diogenes model configurations into DynamoDB")
     parser.add_argument(
@@ -86,11 +128,24 @@ def main() -> None:
         help="AWS region (or set AWS_REGION)",
     )
     parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Download models from HuggingFace and upload to S3 before seeding DynamoDB",
+    )
+    parser.add_argument(
+        "--bucket",
+        default=os.environ.get("MODELS_BUCKET"),
+        help="S3 bucket for model files (required with --upload, or set MODELS_BUCKET)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print models that would be seeded without writing to DynamoDB",
+        help="Print models that would be seeded without writing to DynamoDB or S3",
     )
     args = parser.parse_args()
+
+    if args.upload and not args.bucket:
+        parser.error("--bucket (or MODELS_BUCKET env var) is required with --upload")
 
     table_name = f"diogenes-models-{args.environment}"
 
@@ -100,15 +155,27 @@ def main() -> None:
     if args.dry_run:
         print(f"Would seed {len(DEFAULT_MODELS)} model(s) into {table_name}:")
         for model in DEFAULT_MODELS:
-            print(json.dumps(model, indent=2))
+            item = {k: v for k, v in model.items() if k not in ("hf_repo", "hf_file")}
+            if args.bucket:
+                item["s3_key"] = model["hf_file"]
+            print(json.dumps(item, indent=2))
         return
+
+    if args.upload:
+        print(f"Uploading {len(DEFAULT_MODELS)} model(s) to s3://{args.bucket}/...")
+        for model in DEFAULT_MODELS:
+            upload_model(model, args.bucket, args.region)
+        print()
 
     import boto3
     dynamodb = boto3.resource("dynamodb", region_name=args.region)
     table = dynamodb.Table(table_name)
 
     for model in DEFAULT_MODELS:
-        table.put_item(Item=model)
+        item = {k: v for k, v in model.items() if k not in ("hf_repo", "hf_file")}
+        if args.bucket:
+            item["s3_key"] = model["hf_file"]
+        table.put_item(Item=item)
         print(f"Seeded: {model['name']} ({model['instance_type']})")
 
     print(f"\nDone — {len(DEFAULT_MODELS)} model(s) written to {table_name}")

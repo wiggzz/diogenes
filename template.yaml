@@ -189,6 +189,11 @@ Resources:
           Value: !Sub "diogenes-gpu-${Environment}"
 
   # --- GPU Instance IAM ---
+  ModelsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "diogenes-models-${Environment}-${AWS::AccountId}"
+
   GpuInstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -202,6 +207,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ModelsBucketRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::diogenes-models-${Environment}-${AWS::AccountId}/*"
 
   GpuInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -224,6 +237,7 @@ Resources:
           GPU_SECURITY_GROUP_ID: !GetAtt GpuSecurityGroup.GroupId
           GPU_INSTANCE_PROFILE_ARN: !GetAtt GpuInstanceProfile.Arn
           VLLM_API_KEY: !Ref VllmApiKey
+          MODELS_BUCKET: !Ref ModelsBucket
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref InstancesTable

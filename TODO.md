@@ -150,6 +150,27 @@ when there's spare time.
   This gives the client the actual llama-server phase ("loading model", "error", etc.)
   without log parsing. The `Retry-After` header can also be tuned per-phase.
 
+- **Needs vetting: Lambda router times out on long Qwen 3.6 completions**.
+  During live testing on April 25, 2026, `Qwen/Qwen3.6-27B` was healthy and
+  llama-server logged upstream 200s, but the Router Lambda hit its 120 second timeout
+  on longer/queued requests. Clients can see gateway-level `503` responses with no
+  application body. Likely fixes to evaluate:
+  1. Add true streaming support outside Lambda, e.g. ALB, WebSocket, or a direct
+     signed proxy path.
+  2. Add request guardrails in the Lambda path (`max_tokens`, streaming rejection,
+     clearer 4xx/503 body).
+  3. Investigate disabling Qwen thinking/reasoning by default or via request mapping,
+     because llama-server logs show thinking mode enabled and long reasoning can
+     outlive the Lambda/API Gateway request budget.
+  4. Evaluate whether the OpenAI-compatible client should default to non-streaming
+     plus bounded `max_tokens` for this backend.
+
+- **Needs vetting: `--parallel 1` makes concurrent requests queue behind one long
+  generation**. This was chosen to fit 27B on a single A10G, but live testing showed
+  queued Router invocations timing out while llama-server processed one slot. Evaluate
+  whether lower context, a smaller quant, or a larger instance could support
+  `--parallel 2` without OOM.
+
 ---
 
 ## Observability / Operations
@@ -172,6 +193,41 @@ when there's spare time.
 
 - **No way to see check_health invocation results** beyond CloudWatch Logs. A simple
   `/api/cluster` response field showing "last_health_check_at" would be useful.
+
+- **Needs vetting: deploy-time model sync should surface a concise summary**.
+  CodeBuild worked, but validation required manually reading CloudWatch logs. Consider
+  having `deploy.sh` optionally wait for the build and print uploaded/skipped/pruned
+  model rows, S3 object sizes, and the CodeBuild log link.
+
+- **Needs vetting: CodeBuild model sync dependency install time**. The model sync job
+  installs Python dependencies on every run. This is not on the inference hot path, but
+  a CodeBuild cache or custom image would make redeploys cleaner and faster.
+
+---
+
+## Cold-Start Candidates Requiring Vetting
+
+- **Reduce health-check readiness lag**. EventBridge currently polls once per minute,
+  so DynamoDB `ready` can lag actual llama-server readiness by up to about 60 seconds.
+  Evaluate a 15-20 second schedule or a short burst poll after launch.
+
+- **Instance callback on readiness**. Instead of only polling, cloud-init or the
+  systemd unit could call back when llama-server is ready. Needs a secure mechanism
+  and careful failure handling; polling is simpler and safer today.
+
+- **Stop/start policy for large models**. S3 download of the Qwen 3.6 27B GGUF took
+  about 106 seconds, and total cold start to `ready` was about 5-6 minutes. Stopping
+  instead of terminating could preserve EBS contents and avoid the S3 download on
+  reuse. Needs cost and stale-volume lifecycle evaluation.
+
+- **Keep-warm policy for selected models**. For active testing or high-value models,
+  skipping scale-down entirely may be the best user experience. Needs explicit
+  per-model policy and cost controls.
+
+- **Expose cold-start phase data to clients**. Store timestamps such as
+  `cloud_init_start`, `model_download_start`, `model_download_done`,
+  `llama_service_start`, and health status in DynamoDB so 503 responses can include
+  accurate progress instead of a flat retry message.
 
 ---
 

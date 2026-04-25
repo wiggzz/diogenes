@@ -13,11 +13,13 @@
 
 - Region: `us-east-2`
 - Stack: `diogenes`
-- Stack was updated successfully after `a633b62` changes.
+- Stack was updated successfully after `29927cf Add remote model sync pipeline`.
 - API URL: `https://c64j0mm1c4.execute-api.us-east-2.amazonaws.com`
 - Model bucket output: `diogenes-models-dev-265978616089`
 - Current deployed AMI parameter: `ami-0750beefa394b06e9`
 - AMI pipeline stack is still on recipe `1.3.8`; repo AMI template is `1.3.9`.
+- Model sync project: `diogenes-model-sync-dev`
+- HF token secret used for sync: `arn:aws:secretsmanager:us-east-2:265978616089:secret:diogenes/hf-token-dev-6yDEeu`
 
 ## Cold Start Findings
 
@@ -92,6 +94,55 @@
 - `bash -n scripts/deploy.sh`
 - `sam validate --lint`
   - valid SAM template
+- Deployed with:
+  - `AWS_REGION=us-east-2 STACK_NAME=diogenes HF_TOKEN_SECRET_ARN=<secret-arn> ./scripts/deploy.sh`
+- CodeBuild sync `diogenes-model-sync-dev:993fe4e8-b33c-4798-9085-689506925cfc`:
+  - Downloaded and uploaded `Qwen3.6-27B-Q4_K_M.gguf` (`15.7 GiB`) to S3.
+  - Downloaded and uploaded `Qwen_Qwen3.5-4B-Q4_K_M.gguf` (`2.7 GiB`) to S3.
+  - Seeded `Qwen/Qwen3.6-27B` and `Qwen/Qwen3.5-4B`.
+- CodeBuild sync `diogenes-model-sync-dev:0686fad2-f398-42af-9ba2-c90e52ae912f`:
+  - Skipped both existing GGUF objects.
+  - Pruned stale DynamoDB model row `Qwen/Qwen3.5-27B`.
+- Current model table contains exactly:
+  - `Qwen/Qwen3.6-27B`
+  - `Qwen/Qwen3.5-4B`
+- `/v1/models` returned those two models.
+- Ready-state chat request returned HTTP 200 through the deployed API.
+
+## Qwen 3.6 Cold Start Timing
+
+- Instance: `i-012f2570c1fbc37ab`
+- Public IP during validation: `3.145.168.227`
+- Cold-start log timings:
+  - `cloud_init_start`: `2026-04-25T20:14:33Z`
+  - `model_download_start`: `2026-04-25T20:14:47Z`
+  - `model_download_done`: `2026-04-25T20:16:33Z`
+  - `llama_service_start`: `2026-04-25T20:16:33Z`
+  - llama-server listening: `2026-04-25T20:17:05Z`
+- S3 download duration: about 106 seconds for `16,817,244,384` bytes.
+- Total launch-record age when status script first showed `ready`: about 5-6 minutes.
+- Readiness is currently discovered by EventBridge polling, so DynamoDB can lag actual
+  llama-server readiness by up to about 60 seconds.
+
+## Current Runtime Issue
+
+- User reported client-side errors:
+  - `Error: 503 status code (no body)`
+- Findings:
+  - DynamoDB row for `Qwen/Qwen3.6-27B` was `ready`.
+  - Direct instance `/health` returned HTTP 200 with `{"status":"ok"}`.
+  - llama-server logs showed upstream `POST /v1/chat/completions` responses with HTTP 200.
+  - Router Lambda logs showed several invocations hitting the full `120000 ms` timeout.
+- Working theory:
+  - The Lambda router buffers the full upstream response. Long generations, streaming-like
+    client behavior, Qwen thinking/reasoning, or queueing behind `--parallel 1` can outlive
+    the Lambda/API Gateway request budget and surface as gateway-level 503s with no app body.
+- Added related TODOs, marked as needing vetting:
+  - Non-Lambda streaming/proxy path.
+  - Request guardrails for Lambda proxy path.
+  - Qwen thinking/reasoning defaults.
+  - `--parallel 1` queueing tradeoff.
+  - Cold-start readiness lag, stop/start, keep-warm, and phase reporting.
 
 ## Local Model Note
 
@@ -102,20 +153,11 @@
 
 ## Next Steps
 
-1. Deploy the updated stack and trigger CodeBuild model sync.
-   - Recommended: create a Secrets Manager secret containing the HF token and deploy with
-     `HF_TOKEN_SECRET_ARN=<secret-arn>`.
-   - The sync job should upload `Qwen3.6-27B-Q4_K_M.gguf` and
-     `Qwen_Qwen3.5-4B-Q4_K_M.gguf` to `s3://diogenes-models-dev-265978616089/`,
-     then seed DynamoDB with `s3_key`.
+1. Vet and prioritize the Lambda timeout/streaming issue before relying on the 27B model
+   for long or streaming requests.
 2. Rebuild/deploy AMI pipeline from repo recipe `1.3.9` so new AMIs do not contain baked GGUF files.
-3. Trigger a fresh cold start for `Qwen/Qwen3.6-27B`.
-4. Compare timings from:
-   - `/diogenes/coldstart`
-   - `/diogenes/vllm`
-   - DynamoDB instance timestamps
-5. If S3 fresh-write is still too slow, implement model-level `cold_start_policy`:
+3. If cold start still needs improvement, vet model-level `cold_start_policy`:
    - `terminate`: current cheapest behavior.
    - `stop`: stop instance and keep EBS volume warm.
    - `keep_warm`: skip scale-down.
-6. For `stop` policy, add `ComputeBackend.stop/start` and state `stopped`; update `scale_up` to start existing stopped instances before launching new ones.
+4. For `stop` policy, add `ComputeBackend.stop/start` and state `stopped`; update `scale_up` to start existing stopped instances before launching new ones.

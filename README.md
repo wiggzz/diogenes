@@ -3,6 +3,7 @@
 Diogenes is a personal LLM backend control plane designed to scale GPU inference to zero when idle.
 
 Current status: phases 1-4 are implemented (orchestration, routing, API key auth, and cluster state). The runtime now starts `llama-server` on GPU instances, although some internal names still say `vLLM`.
+Inference is exposed through a Lambda Function URL for true streamed responses.
 
 Not yet implemented:
 - Google OAuth / JWT validation. Programmatic API keys with the `dio-` prefix are implemented.
@@ -148,6 +149,8 @@ Dependency note:
 
 - All API Gateway routes are protected by the Lambda authorizer. Use `Authorization: Bearer <dio-key>` with keys created by `make create-api-key`.
 - First inference for a cold model returns `503` with `Retry-After`; the router triggers async scale-up and clients should retry.
+- Use the `StreamingApiUrl` stack output for inference clients. It validates the same `Authorization: Bearer <dio-key>` API keys and supports `POST /v1/responses`, `POST /v1/chat/completions`, and `GET /v1/models`.
+- Prefer OpenAI's Responses API (`POST /v1/responses`) for new clients. Chat completions remain available for compatibility; legacy completions are not exposed.
 - GPU instances must expose port `8000`; the generated security group currently opens that port publicly.
 - The default model seed data points at GGUF model files for `llama-server`. Ensure the files exist in the AMI or upload them to the model bucket and seed `s3_key`.
 

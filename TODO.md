@@ -7,11 +7,6 @@ when there's spare time.
 
 ## Bugs / Correctness
 
-- **`proxy_request` assumes every non-SSE upstream response is JSON** (`router.py:29`).
-  If `llama-server` returns an HTML/text error page or an empty body, `response.json()`
-  raises and the router converts the upstream response into a generic 502. Preserve
-  the upstream status and return a safe text/error payload when JSON parsing fails.
-
 - **`manual_scale down` skips actual EC2 termination** (`cluster.py:75`).
   It calls `state.update_instance(status="terminated")` directly without calling
   `compute.terminate()`. The instance is marked gone in DynamoDB but keeps running
@@ -26,13 +21,6 @@ when there's spare time.
   paginate — if there are ever >1 MB of instance records, results will be silently
   truncated. Fix: add a GSI on `status` alone, or add pagination (`LastEvaluatedKey`
   loop) to the scan path.
-
-- **`e2e/test_full_lifecycle.py` calls `scale_up` and asserts `status == "ready"`**
-  (`test_full_lifecycle.py:24`). After the EventBridge polling refactor, `scale_up`
-  returns `status="starting"` immediately — it no longer waits for health. This test
-  is broken (it monkeypatches `VLLM_PORT` but the health check loop is gone). The
-  test needs to be rewritten to call `check_health` after `scale_up`, matching the
-  new architecture.
 
 - **`compute.py` user_data embeds `VLLM_ARGS` with double-quotes** (line ~103):
   `VLLM_ARGS="{vllm_args}"`. If `vllm_args` contains a double-quote character this
@@ -49,9 +37,6 @@ when there's spare time.
 ---
 
 ## Missing Tests
-
-- **`proxy_request` has no test for non-JSON error responses**. Add coverage for
-  upstream 500/502 text bodies so JSON decoding failures don't mask the real status.
 
 - **`check_health` is not tested when an instance has no `provider_instance_id`**
   (placeholder-only record before EC2 call returns). The timeout path skips the
@@ -71,8 +56,9 @@ when there's spare time.
 - **`cluster.py` `get_cluster_state`** doesn't test the "warming" (starting) state
   path — only ready and cold are tested.
 
-- **E2E tests don't cover streaming (SSE)**. The unit test for SSE exists, but
-  there's no e2e path exercising it through the full handler stack.
+- **Streaming Function URL lacks an automated integration test**. The Node.js handler
+  is syntax-checked locally, but there is no LocalStack/e2e coverage for
+  `InvokeMode: RESPONSE_STREAM` behavior.
 
 ---
 
@@ -93,16 +79,9 @@ when there's spare time.
   backend is stateless so this is harmless, but it's inconsistent and creates a new
   boto3 client on every handler call. Should be cached the same way the state store is.
 
-- **Port constant is defined in three places**: `orchestrator.py` (`SERVER_PORT = 8000`,
-  `VLLM_PORT = SERVER_PORT`), `router.py` (`VLLM_PORT = 8000`), `config.py`
-  (`VLLM_PORT = 8000`). The `config.py` one appears unused. Pick one place (probably
-  `config.py`) and import from there.
-
-- **`cluster.py` `manual_scale`** validates model existence before acting but
-  `router.py` `handle_inference` does not — it calls `trigger_scale_up` for any
-  unknown model name, which will result in a `ValueError` inside the orchestrator
-  Lambda that's swallowed silently. The router should check that the model exists
-  before triggering and return a 404 instead.
+- **Port constant is defined in two places**: `orchestrator.py` (`SERVER_PORT = 8000`,
+  `VLLM_PORT = SERVER_PORT`) and `config.py` (`VLLM_PORT = 8000`). The `config.py`
+  one appears unused. Pick one place and import from there.
 
 - **`instance-logs.sh` hardcodes port 8000** for the health check curl. It should
   use the same port constant/convention as the rest of the codebase.
@@ -140,30 +119,15 @@ when there's spare time.
   failures. Consider a guided bootstrap target that runs deploy, seeds models, prints
   `ApiUrl`, and creates or imports an initial API key.
 
-- **Cold-start 503 message is a flat string** (`router.py:59`). The llama-server
+- **Cold-start 503 message is a flat string** in the streaming router. The llama-server
   `/health` endpoint returns `{"status": "loading model"}` while loading and
   `{"status": "ok"}` when ready. Better approach:
   1. In `check_health` (`orchestrator.py`), when an instance isn't ready, store the
      raw `/health` response body as `status_message` on the DynamoDB instance record.
-  2. In `router.py`, read `starting_instances[0].get("status_message")` and include
-     it in the 503 body, falling back to a generic message.
+  2. In `streaming_router.js`, read `starting_instances[0].get("status_message")`
+     and include it in the 503 body, falling back to a generic message.
   This gives the client the actual llama-server phase ("loading model", "error", etc.)
   without log parsing. The `Retry-After` header can also be tuned per-phase.
-
-- **Needs vetting: Lambda router times out on long Qwen 3.6 completions**.
-  During live testing on April 25, 2026, `Qwen/Qwen3.6-27B` was healthy and
-  llama-server logged upstream 200s, but the Router Lambda hit its 120 second timeout
-  on longer/queued requests. Clients can see gateway-level `503` responses with no
-  application body. Likely fixes to evaluate:
-  1. Add true streaming support outside Lambda, e.g. ALB, WebSocket, or a direct
-     signed proxy path.
-  2. Add request guardrails in the Lambda path (`max_tokens`, streaming rejection,
-     clearer 4xx/503 body).
-  3. Investigate disabling Qwen thinking/reasoning by default or via request mapping,
-     because llama-server logs show thinking mode enabled and long reasoning can
-     outlive the Lambda/API Gateway request budget.
-  4. Evaluate whether the OpenAI-compatible client should default to non-streaming
-     plus bounded `max_tokens` for this backend.
 
 - **Needs vetting: `--parallel 1` makes concurrent requests queue behind one long
   generation**. This was chosen to fit 27B on a single A10G, but live testing showed

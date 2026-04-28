@@ -5,8 +5,8 @@
       "hf_repo": "unsloth/Qwen3.6-27B-GGUF",
       "hf_file": "Qwen3.6-27B-Q4_K_M.gguf",
       "model_id": "/opt/models/Qwen3.6-27B-Q4_K_M.gguf",
-      "instance_type": "g5.2xlarge",
-      "vllm_args": "-ngl 99 --ctx-size 32768 --parallel 1 --jinja",
+      "instance_type": "g6e.2xlarge",
+      "vllm_args": "-ngl 99 --ctx-size 262144 --parallel 1 --jinja",
       "idle_timeout": 300
     },
     {

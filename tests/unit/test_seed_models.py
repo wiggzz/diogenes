@@ -48,6 +48,8 @@ def test_load_models_reads_repo_manifest():
     ]
     assert models[0]["hf_repo"] == "unsloth/Qwen3.6-27B-GGUF"
     assert models[0]["hf_file"] == "Qwen3.6-27B-Q4_K_M.gguf"
+    assert models[0]["instance_type"] == "g6e.2xlarge"
+    assert "--ctx-size 262144" in models[0]["vllm_args"]
 
 
 class _FakeTable:

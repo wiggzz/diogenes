@@ -120,19 +120,21 @@ Diogenes uses Google OAuth 2.0 for identity, with an email allowlist for access 
 
 ### Components
 
-#### 1. API Gateway (AWS HTTP API)
+#### 1. API Gateway (AWS HTTP API) and Streaming Function URL
 
-Single entry point for all traffic. Routes:
-- `POST /v1/chat/completions` — OpenAI-compatible chat completion
-- `POST /v1/completions` — OpenAI-compatible text completion
+The Lambda Function URL is the inference entry point. Routes:
+- `POST /v1/responses` — OpenAI-compatible Responses API
+- `POST /v1/chat/completions` — compatibility fallback
 - `GET /v1/models` — List available models
+
+The API Gateway URL is the control-plane entry point. Routes:
 - `GET /api/cluster` — Cluster state for the UI
 - `POST /api/cluster/scale` — Manual scale up/down
 - `POST /api/keys` — Create an API key (returns the key once)
 - `GET /api/keys` — List API keys (metadata only, not the key itself)
 - `DELETE /api/keys/{key_id}` — Revoke an API key
 
-#### 2. Router Lambda
+#### 2. Streaming Router Lambda
 
 Receives inference requests. Checks DynamoDB for a running instance with the requested model. If one exists, proxies the request. If not, enqueues a scale-up request and returns a `503` with `Retry-After` header (client polls).
 

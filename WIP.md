@@ -127,7 +127,8 @@
 ## Qwen 3.6 Memory / Context Notes
 
 - Current runtime args for 27B:
-  - `-ngl 99 --ctx-size 32768 --parallel 1 --jinja`
+  - Previous `g5.2xlarge` default: `-ngl 99 --ctx-size 32768 --parallel 1 --jinja`
+  - Updated `g6e.2xlarge` default: `-ngl 99 --ctx-size 262144 --parallel 1 --jinja`
 - Startup memory logs at 32k context:
   - GPU: NVIDIA A10G, about `22587 MiB` total VRAM.
   - llama.cpp projected use: `18038 MiB` device memory.
@@ -141,14 +142,37 @@
   - `96k`/`128k` likely need a smaller quant or more VRAM.
   - Full `262k` model context is not realistic on A10G for this 27B quant.
 - AWS more-VRAM options within 32 vCPUs to vet:
-  - `g6e.xlarge`: 4 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
-  - `g6e.2xlarge`: 8 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
-  - `g6e.4xlarge`: 16 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
-  - `g6e.8xlarge`: 32 vCPUs, one L40S-class GPU, 44 GiB accelerator memory.
+  - `g6e.xlarge`: 4 vCPUs, one L40S-class GPU, 48 GB advertised GPU memory.
+  - `g6e.2xlarge`: 8 vCPUs, one L40S-class GPU, 48 GB advertised GPU memory.
+  - `g6e.4xlarge`: 16 vCPUs, one L40S-class GPU, 48 GB advertised GPU memory.
+  - `g6e.8xlarge`: 32 vCPUs, one L40S-class GPU, 48 GB advertised GPU memory.
+  - Practical usable VRAM will be lower after driver/runtime overhead, but this is still
+    roughly 2x the current single A10G `g5.2xlarge` class.
 - Next suggested experiment:
-  - Try `--ctx-size 65536` on `Qwen/Qwen3.6-27B` with the current `g5.2xlarge`.
-  - If that is too tight or long-context usage is still poor, evaluate `g6e.2xlarge`
-    or `g6e.4xlarge` before jumping to `g6e.8xlarge`.
+  - Cold-start `Qwen/Qwen3.6-27B` on `g6e.2xlarge` with `--ctx-size 262144`
+    and verify llama-server's projected memory, prompt ingestion speed, and first-token
+    latency under realistic long-context prompts.
+  - Keep `--parallel 1` for personal use and maximum context headroom.
+
+### Quick EC2 price comparison
+
+- Region/pricing basis: `us-east-1`, Linux shared-tenancy On-Demand, AWS Pricing API
+  publication `2026-04-27T07:13:25Z`.
+
+| Instance | vCPU | RAM | GPU | GPU memory | On-Demand $/hr | 730h $/mo | vs `g5.2xlarge` |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| `g5.2xlarge` | 8 | 32 GiB | 1x A10G | 24 GB | 1.21200 | 884.76 | 1.00x |
+| `g6e.xlarge` | 4 | 32 GiB | 1x L40S | 48 GB | 1.86100 | 1,358.53 | 1.54x |
+| `g6e.2xlarge` | 8 | 64 GiB | 1x L40S | 48 GB | 2.24208 | 1,636.72 | 1.85x |
+| `g6e.4xlarge` | 16 | 128 GiB | 1x L40S | 48 GB | 3.00424 | 2,193.10 | 2.48x |
+| `g6e.8xlarge` | 32 | 256 GiB | 1x L40S | 48 GB | 4.52856 | 3,305.85 | 3.74x |
+
+- Best first larger-instance candidate: `g6e.2xlarge`. It preserves the current 8 vCPU
+  shape while doubling advertised GPU memory and system RAM.
+- Cheapest 48 GB VRAM candidate: `g6e.xlarge`, but the vCPU downgrade from 8 to 4 could
+  hurt prompt processing, model loading, and general llama.cpp overhead.
+- `g6e.4xlarge` is the likely next step if `g6e.2xlarge` has CPU-side bottlenecks or if
+  `--parallel 2` needs more host headroom. `g6e.8xlarge` should be a later escalation.
 
 ## Current Runtime Issue
 
@@ -163,9 +187,23 @@
   - The Lambda router buffers the full upstream response. Long generations, streaming-like
     client behavior, Qwen thinking/reasoning, or queueing behind `--parallel 1` can outlive
     the Lambda/API Gateway request budget and surface as gateway-level 503s with no app body.
+- Previous code detail:
+  - The removed buffered `RouterFunction` was configured with `Timeout: 120`.
+  - Its `proxy_request` called `requests.post(..., timeout=120)`.
+  - This left no budget for controlled error handling when upstream generation approached
+    the Lambda limit, so API Gateway/Lambda could synthesize a bodyless 503.
+- Streaming fix direction:
+  - Implemented direction: inference now uses a Node.js Lambda Function URL with
+    `InvokeMode: RESPONSE_STREAM`.
+  - The previous `AWS::Serverless::HttpApi` + Python Lambda inference path was removed
+    instead of kept as a deprecated non-streaming endpoint.
+  - The streaming function validates the same `dio-` API keys, queries DynamoDB for the
+    ready instance, triggers scale-up on cold models, and pipes upstream response chunks
+    without buffering the full completion.
+  - Preferred client endpoint for new work: `POST /v1/responses` on the `StreamingApiUrl`
+    stack output. llama.cpp now documents `/v1/responses`; chat completions remain as
+    compatibility fallback, and legacy completions are not exposed.
 - Added related TODOs, marked as needing vetting:
-  - Non-Lambda streaming/proxy path.
-  - Request guardrails for Lambda proxy path.
   - Qwen thinking/reasoning defaults.
   - `--parallel 1` queueing tradeoff.
   - Cold-start readiness lag, stop/start, keep-warm, and phase reporting.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from control_plane.backends.mock.compute import MockComputeBackend
 from control_plane.backends.mock.state import InMemoryStateStore
-from control_plane.core import orchestrator, router
+from control_plane.core import orchestrator
 
 
 def test_full_cold_start_inference_and_scale_down_cycle(mock_vllm, monkeypatch):
@@ -18,29 +18,11 @@ def test_full_cold_start_inference_and_scale_down_cycle(mock_vllm, monkeypatch):
     )
     compute = MockComputeBackend(mock_ip=mock_vllm.host)
 
-    triggered = []
-    cold = router.handle_inference(
-        model="Qwen/Qwen3-32B",
-        body={"model": "Qwen/Qwen3-32B", "messages": [{"role": "user", "content": "hi"}]},
-        state=state,
-        trigger_scale_up=triggered.append,
-    )
-    assert cold["status_code"] == 503
-    assert triggered == ["Qwen/Qwen3-32B"]
-
-    monkeypatch.setattr(orchestrator, "VLLM_PORT", mock_vllm.port)
+    monkeypatch.setattr(orchestrator, "SERVER_PORT", mock_vllm.port)
     up = orchestrator.scale_up("Qwen/Qwen3-32B", state, compute)
-    assert up["status"] == "ready"
-
-    monkeypatch.setattr(router, "VLLM_PORT", mock_vllm.port)
-    warm = router.handle_inference(
-        model="Qwen/Qwen3-32B",
-        body={"model": "Qwen/Qwen3-32B", "messages": [{"role": "user", "content": "hello"}]},
-        state=state,
-        trigger_scale_up=lambda *_: None,
-    )
-    assert warm["status_code"] == 200
-    assert warm["body"]["id"] == "chatcmpl-mock"
+    assert up["status"] == "starting"
+    health = orchestrator.check_health(state, compute)
+    assert health["became_ready"] == ["model#Qwen/Qwen3-32B"]
 
     instance = state.get_instance("model#Qwen/Qwen3-32B")
     state.update_instance(instance["instance_id"], last_request_at=0)

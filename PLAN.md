@@ -96,15 +96,14 @@ class ComputeBackend(Protocol):
 - `ami/imagebuilder-template.yaml`, `ami/imagebuilder.sh` — GPU AMI pipeline/bootstrap via EC2 Image Builder
 - `tests/unit/test_orchestrator.py`
 
-### Phase 2: Router
+### Phase 2: Streaming Router
 
 **Files:**
-- `control-plane/core/router.py`:
-  - `handle_inference(model, body, state, trigger_scale_up)` — find ready instance or return 503 + trigger async scale-up
-  - `proxy_request(ip, port, path, body)` — HTTP forward to vLLM
-  - `list_models(state)` — OpenAI-compatible model list
-- `control-plane/backends/aws/handlers.py` — add `router_handler`: parses API Gateway event, calls core, invokes orchestrator Lambda async if needed
-- `tests/unit/test_router.py`
+- `control-plane/backends/aws/streaming_router.js`:
+  - validates `dio-` API keys
+  - finds a ready instance or returns 503 + triggers async scale-up
+  - streams upstream llama-server response chunks through a Lambda Function URL
+- `template.yaml` — exposes `StreamingApiUrl` with `InvokeMode: RESPONSE_STREAM`
 
 ### Phase 3: Auth (API Keys)
 

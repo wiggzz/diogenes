@@ -7,7 +7,7 @@ import json
 from control_plane.backends.aws import handlers
 from control_plane.backends.aws.state import DynamoDBStateStore
 from control_plane.backends.mock.compute import MockComputeBackend
-from control_plane.core import orchestrator, router
+from control_plane.core import orchestrator
 
 
 MODEL_NAME = "Qwen/Qwen3-32B"
@@ -33,34 +33,16 @@ def _seed_model(state):
     )
 
 
-def test_localstack_router_cluster_and_scale_down_flow(localstack_env, mock_vllm, monkeypatch):
+def test_localstack_cluster_and_scale_down_flow(localstack_env, mock_vllm, monkeypatch):
     state = _build_state(localstack_env)
     _seed_model(state)
 
     monkeypatch.setattr(handlers, "_get_state_store", lambda: state)
-    monkeypatch.setattr(orchestrator, "VLLM_PORT", mock_vllm.port)
-    monkeypatch.setattr(router, "VLLM_PORT", mock_vllm.port)
+    monkeypatch.setattr(orchestrator, "SERVER_PORT", mock_vllm.port)
 
     compute = MockComputeBackend(mock_ip=mock_vllm.host)
-
-    def trigger_scale_up(model_name: str):
-        orchestrator.scale_up(model_name, state, compute)
-
-    monkeypatch.setattr(handlers, "_make_trigger_scale_up", lambda: trigger_scale_up)
-
-    request_event = {
-        "requestContext": {"http": {"method": "POST"}},
-        "rawPath": "/v1/chat/completions",
-        "body": json.dumps({"model": MODEL_NAME, "messages": [{"role": "user", "content": "hi"}]}),
-    }
-
-    cold = handlers.router_handler(request_event, None)
-    assert cold["statusCode"] == 503
-
-    warm = handlers.router_handler(request_event, None)
-    warm_body = json.loads(warm["body"])
-    assert warm["statusCode"] == 200
-    assert warm_body["id"] == "chatcmpl-mock"
+    orchestrator.scale_up(MODEL_NAME, state, compute)
+    orchestrator.check_health(state, compute)
 
     cluster_event = {"requestContext": {"http": {"method": "GET"}}, "rawPath": "/api/cluster"}
     cluster = handlers.cluster_handler(cluster_event, None)

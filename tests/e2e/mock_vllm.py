@@ -2,8 +2,8 @@
 
 Runs as a background thread, responds to:
 - GET  /health                  -> 200 OK
+- POST /v1/responses            -> canned response
 - POST /v1/chat/completions     -> canned chat response
-- POST /v1/completions          -> canned completion response
 - GET  /v1/models               -> model list
 """
 
@@ -39,7 +39,16 @@ class MockVLLMHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length) if content_length else b"{}"
 
-        if self.path == "/v1/chat/completions":
+        if self.path == "/v1/responses":
+            self._respond(
+                200,
+                {
+                    "id": "resp-mock",
+                    "object": "response",
+                    "output_text": "Hello! I'm a mock response.",
+                },
+            )
+        elif self.path == "/v1/chat/completions":
             self._respond(
                 200,
                 {
@@ -59,26 +68,6 @@ class MockVLLMHandler(BaseHTTPRequestHandler):
                         "prompt_tokens": 10,
                         "completion_tokens": 8,
                         "total_tokens": 18,
-                    },
-                },
-            )
-        elif self.path == "/v1/completions":
-            self._respond(
-                200,
-                {
-                    "id": "cmpl-mock",
-                    "object": "text_completion",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "text": "Mock completion response.",
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": 5,
-                        "completion_tokens": 4,
-                        "total_tokens": 9,
                     },
                 },
             )

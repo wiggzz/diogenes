@@ -351,12 +351,13 @@ Resources:
               Action: iam:PassRole
               Resource: !GetAtt GpuInstanceRole.Arn
 
-  RouterFunction:
+  StreamingRouterFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: control_plane.backends.aws.handlers.router_handler
+      Runtime: nodejs20.x
+      Handler: control_plane/backends/aws/streaming_router.handler
       CodeUri: ./
-      Timeout: 120
+      Timeout: 900
       Environment:
         Variables:
           ORCHESTRATOR_FUNCTION_NAME: !Ref OrchestratorFunction
@@ -366,27 +367,42 @@ Resources:
             TableName: !Ref InstancesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ModelsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ApiKeysTable
         - LambdaInvokePolicy:
             FunctionName: !Ref OrchestratorFunction
-      Events:
-        ChatCompletions:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref DiogenesApi
-            Path: /v1/chat/completions
-            Method: POST
-        Completions:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref DiogenesApi
-            Path: /v1/completions
-            Method: POST
-        Models:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref DiogenesApi
-            Path: /v1/models
-            Method: GET
+
+  StreamingRouterFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt StreamingRouterFunction.Arn
+      AuthType: NONE
+      InvokeMode: RESPONSE_STREAM
+      Cors:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+
+  StreamingRouterFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StreamingRouterFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  StreamingRouterFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StreamingRouterFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
 
   AuthorizerFunction:
     Type: AWS::Serverless::Function
@@ -458,6 +474,9 @@ Outputs:
   ApiUrl:
     Description: API Gateway URL
     Value: !Sub "https://${DiogenesApi}.execute-api.${AWS::Region}.amazonaws.com"
+  StreamingApiUrl:
+    Description: Lambda Function URL for true streaming inference
+    Value: !GetAtt StreamingRouterFunctionUrl.FunctionUrl
   OrchestratorFunctionName:
     Value: !Ref OrchestratorFunction
   ModelsBucketName:

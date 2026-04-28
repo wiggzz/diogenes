@@ -113,43 +113,6 @@ def orchestrator_handler(event, context):
         return {"statusCode": 400, "body": json.dumps({"error": "unknown action"})}
 
 
-# ---- Phase 2: Router ----
-
-
-def router_handler(event, context):
-    """Router Lambda — handles OpenAI-compatible API requests."""
-    from control_plane.core.router import handle_inference, list_models
-
-    state = _get_state_store()
-
-    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-    path = event.get("rawPath", "")
-
-    if method == "GET" and path == "/v1/models":
-        result = list_models(state)
-        return _api_response(200, result)
-
-    if method == "POST" and path in ("/v1/chat/completions", "/v1/completions"):
-        import os
-        body = json.loads(event.get("body", "{}"))
-        trigger = _make_trigger_scale_up()
-        result = handle_inference(
-            model=body.get("model", ""),
-            body=body,
-            path=path,
-            state=state,
-            trigger_scale_up=trigger,
-            vllm_api_key=os.environ.get("VLLM_API_KEY", ""),
-        )
-        return _api_response(
-            result["status_code"],
-            result["body"],
-            result.get("headers"),
-        )
-
-    return _api_response(404, {"error": "not found"})
-
-
 def _make_trigger_scale_up():
     """Return a callable that async-invokes the Orchestrator Lambda."""
     import boto3

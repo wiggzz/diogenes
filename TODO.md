@@ -22,7 +22,12 @@ instead of leaving them only in chat history or local notes.
   followed by `speculative decoding not supported by this context`. Figure out whether
   this is caused by Qwen3.6's hybrid/recurrent architecture, prompt cache, 262k context,
   or the current llama.cpp build before re-enabling speculative flags. Upstream
-  tracking: ggml-org/llama.cpp#20039.
+  tracking: ggml-org/llama.cpp#20039. Follow-up research on 2026-05-02 found the
+  deployed logs were running `build_info: b8757-a29e4c0b7`, after upstream
+  speculative checkpointing merged in ggml-org/llama.cpp#19493. Retest with the
+  checkpoint path explicitly enabled, e.g. `--spec-type ngram-mod --draft-max 48`
+  plus the current checkpoint flag syntax, and record acceptance rate / tokens per
+  second before making it a default.
 
 - **`seed_models.py` without `--use-s3` can remove `s3_key` from deployed rows**.
   Running the normal seed command against a stack that expects S3-backed model files

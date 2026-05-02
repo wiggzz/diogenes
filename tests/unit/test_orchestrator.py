@@ -400,6 +400,65 @@ def test_scale_up_starts_warm_instance(monkeypatch, state, compute):
     assert len(compute.launched) == 0
 
 
+def test_scale_up_starts_warm_instance_after_provider_stopped_during_scale_down(
+    monkeypatch, state, compute
+):
+    now = 10_000
+    monkeypatch.setattr(orchestrator.time, "time", lambda: now)
+    compute.instance_states["i-stopping"] = "stopped"
+    state.put_instance(
+        {
+            "instance_id": "model#Qwen/Qwen3-32B",
+            "provider_instance_id": "i-stopping",
+            "model": "Qwen/Qwen3-32B",
+            "status": "stopping",
+            "ip": "10.0.0.1",
+            "instance_type": "g5.xlarge",
+            "launched_at": now - 1000,
+            "last_request_at": now - 500,
+            "stopping_at": now - 30,
+            "warm_expires_at": now + 100,
+        }
+    )
+
+    result = orchestrator.scale_up("Qwen/Qwen3-32B", state, compute)
+
+    assert result["status"] == "starting"
+    assert result["provider_instance_id"] == "i-stopping"
+    assert result["ip"] == "127.0.0.1"
+    assert compute.started == ["i-stopping"]
+    assert len(compute.launched) == 0
+
+
+def test_scale_up_reports_still_stopping_instance_without_launching(
+    monkeypatch, state, compute
+):
+    now = 10_000
+    monkeypatch.setattr(orchestrator.time, "time", lambda: now)
+    compute.instance_states["i-stopping"] = "stopping"
+    state.put_instance(
+        {
+            "instance_id": "model#Qwen/Qwen3-32B",
+            "provider_instance_id": "i-stopping",
+            "model": "Qwen/Qwen3-32B",
+            "status": "stopping",
+            "ip": "10.0.0.1",
+            "instance_type": "g5.xlarge",
+            "launched_at": now - 1000,
+            "last_request_at": now - 500,
+            "stopping_at": now - 30,
+            "warm_expires_at": now + 100,
+        }
+    )
+
+    result = orchestrator.scale_up("Qwen/Qwen3-32B", state, compute)
+
+    assert result["status"] == "stopping"
+    assert result["last_request_at"] == now
+    assert compute.started == []
+    assert len(compute.launched) == 0
+
+
 def test_scale_up_terminates_expired_warm_instance_then_launches(monkeypatch, state, compute):
     now = 10_000
     monkeypatch.setattr(orchestrator.time, "time", lambda: now)

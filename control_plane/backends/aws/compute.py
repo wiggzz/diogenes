@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 
 import boto3
 from botocore.exceptions import ClientError
@@ -125,6 +126,18 @@ class EC2ComputeBackend:
         return {
             "state": instance["State"]["Name"],
             "ip": instance.get("PublicIpAddress", ""),
+        }
+
+    def runtime_fingerprint(self) -> dict:
+        """Return non-secret runtime inputs that require a fresh instance when changed."""
+        api_key_hash = ""
+        if self._vllm_api_key:
+            api_key_hash = hashlib.sha256(self._vllm_api_key.encode("utf-8")).hexdigest()
+        return {
+            "backend": "aws-ec2",
+            "ami_id": self._ami_id,
+            "models_bucket": self._models_bucket,
+            "vllm_api_key_hash": api_key_hash,
         }
 
     def _public_ip(self, instance_id: str) -> str:

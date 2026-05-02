@@ -6,6 +6,8 @@ Cloud-agnostic: depends on StateStore and ComputeBackend protocols.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import time
 
 import requests
@@ -53,11 +55,18 @@ def scale_up(
         raise ValueError(f"Unknown model: {model_name}")
 
     now = int(time.time())
+    launch_config_hash = _launch_config_hash(model_config, compute)
+
+    stopping = _reconcile_stopping_for_scale_up(model_name, state, compute, now)
+    if stopping is not None:
+        return stopping
 
     stopped = state.list_instances(model=model_name, status="stopped")
     if stopped:
         warm = stopped[0]
-        if _warm_instance_expired(warm, now):
+        if _warm_instance_expired(warm, now) or _launch_config_changed(
+            warm, launch_config_hash
+        ):
             provider_id = warm.get("provider_instance_id")
             if provider_id:
                 compute.terminate(provider_id)
@@ -75,6 +84,7 @@ def scale_up(
                     launched_at=now,
                     last_request_at=now,
                     started_at=now,
+                    launch_config_hash=launch_config_hash,
                 )
                 try:
                     ip = compute.start(provider_id)
@@ -90,6 +100,7 @@ def scale_up(
                         "launched_at": now,
                         "last_request_at": now,
                         "started_at": now,
+                        "launch_config_hash": launch_config_hash,
                     }
                 )
                 return warm
@@ -108,6 +119,7 @@ def scale_up(
         "instance_type": model_config["instance_type"],
         "launched_at": now,
         "last_request_at": now,
+        "launch_config_hash": launch_config_hash,
     }
 
     # Optimistic claim for scale-up ownership via conditional write.
@@ -144,6 +156,26 @@ def scale_up(
         model_name,
     )
     return placeholder
+
+
+def _reconcile_stopping_for_scale_up(
+    model_name: str,
+    state: StateStore,
+    compute: ComputeBackend,
+    now: int,
+) -> dict | None:
+    stopping = state.list_instances(model=model_name, status="stopping")
+    if not stopping:
+        return None
+
+    return _reconcile_stopping_instance(
+        stopping[0],
+        state,
+        compute,
+        now,
+        touch_request=True,
+        recover_stale=False,
+    )
 
 
 def scale_down(state: StateStore, compute: ComputeBackend) -> dict[str, list[str]]:
@@ -268,40 +300,116 @@ def scale_down(state: StateStore, compute: ComputeBackend) -> dict[str, list[str
 
 def _recover_stopping_instances(state: StateStore, compute: ComputeBackend, now: int) -> None:
     for inst in state.list_instances(status="stopping"):
-        provider_id = inst.get("provider_instance_id")
-        if not provider_id:
-            state.update_instance(inst["instance_id"], status="terminated")
-            continue
+        _reconcile_stopping_instance(
+            inst,
+            state,
+            compute,
+            now,
+            touch_request=False,
+            recover_stale=True,
+        )
 
-        try:
-            provider_status = compute.instance_status(provider_id)
-        except Exception:
-            logger.exception("Failed to inspect stopping instance %s", provider_id)
-            continue
 
-        provider_state = provider_status.get("state", "")
-        if provider_state == "stopped":
-            state.update_instance(
-                inst["instance_id"],
-                status="stopped",
-                previous_ip=inst.get("ip", ""),
-                ip="",
-                stopped_at=now,
-            )
-        elif provider_state in {"terminated", "shutting-down"}:
-            state.update_instance(inst["instance_id"], status="terminated")
-        elif now - int(inst.get("stopping_at", now)) > STOPPING_RECOVERY_SECONDS:
-            logger.warning(
-                "Recovering stale stopping instance %s with provider state %s",
-                inst["instance_id"],
-                provider_state,
-            )
-            state.update_instance(inst["instance_id"], status="ready", last_request_at=now)
+def _reconcile_stopping_instance(
+    inst: dict,
+    state: StateStore,
+    compute: ComputeBackend,
+    now: int,
+    *,
+    touch_request: bool,
+    recover_stale: bool,
+) -> dict | None:
+    provider_id = inst.get("provider_instance_id")
+    if not provider_id:
+        state.update_instance(inst["instance_id"], status="terminated")
+        return None
+
+    try:
+        provider_status = compute.instance_status(provider_id)
+    except Exception:
+        logger.exception("Failed to inspect stopping instance %s", provider_id)
+        if touch_request:
+            state.update_instance(inst["instance_id"], last_request_at=now)
+            inst["last_request_at"] = now
+            return inst
+        return None
+
+    provider_state = provider_status.get("state", "")
+    if provider_state == "stopped":
+        state.update_instance(
+            inst["instance_id"],
+            status="stopped",
+            previous_ip=inst.get("ip", ""),
+            ip="",
+            stopped_at=now,
+        )
+        return None
+
+    if provider_state in {"terminated", "shutting-down"}:
+        state.update_instance(inst["instance_id"], status="terminated")
+        return None
+
+    if provider_state == "running" and touch_request:
+        ip = provider_status.get("ip") or inst.get("ip", "")
+        state.update_instance(
+            inst["instance_id"],
+            status="ready",
+            ip=ip,
+            last_request_at=now,
+        )
+        inst.update({"status": "ready", "ip": ip, "last_request_at": now})
+        return inst
+
+    if recover_stale and _stopping_instance_stale(inst, now):
+        logger.warning(
+            "Recovering stale stopping instance %s with provider state %s",
+            inst["instance_id"],
+            provider_state,
+        )
+        state.update_instance(inst["instance_id"], status="ready", last_request_at=now)
+        inst.update({"status": "ready", "last_request_at": now})
+        return inst
+
+    if touch_request:
+        state.update_instance(inst["instance_id"], last_request_at=now)
+        inst["last_request_at"] = now
+        return inst
+
+    return None
+
+
+def _stopping_instance_stale(inst: dict, now: int) -> bool:
+    return now - int(inst.get("stopping_at", now)) > STOPPING_RECOVERY_SECONDS
 
 
 def _warm_instance_expired(inst: dict, now: int) -> bool:
     expires_at = int(inst.get("warm_expires_at", 0))
     return expires_at > 0 and now >= expires_at
+
+
+def _launch_config_changed(inst: dict, expected_hash: str) -> bool:
+    existing = inst.get("launch_config_hash")
+    if existing is None:
+        # Instance predates fingerprinting — assume compatible, hash will be set on start.
+        return False
+    return existing != expected_hash
+
+
+def _launch_config_hash(model_config: dict, compute: ComputeBackend) -> str:
+    relevant_config = {
+        "name": model_config.get("name", ""),
+        "model_id": model_config.get("model_id", ""),
+        "instance_type": model_config.get("instance_type", ""),
+        "vllm_args": model_config.get("vllm_args", ""),
+        "s3_key": model_config.get("s3_key", ""),
+    }
+    runtime_fingerprint = getattr(compute, "runtime_fingerprint", lambda: "")()
+    payload = {
+        "model": relevant_config,
+        "runtime": runtime_fingerprint,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _oldest_active_request_start(inst: dict, default: int) -> int:

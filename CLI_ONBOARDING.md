@@ -196,6 +196,91 @@ Release artifacts should include:
 This avoids requiring users to install SAM, `uv`, Python dependencies, or clone the
 repo just to deploy.
 
+Releases should be automated with release-please so CLI versions, changelogs, tags,
+and GitHub Release artifacts stay consistent. A release should publish the Rust
+`szlctl` binaries plus the deployable AWS artifacts for the same version. The CLI
+should default to deploying artifacts from its own version unless the user explicitly
+chooses another release:
+
+```bash
+szlctl up aws --version latest
+szlctl up aws --version 0.3.1
+```
+
+This keeps support and rollback concrete: the binary, templates, Lambda packages,
+model manifest, and checksums all come from one release.
+
+## AWS Trust Model
+
+The onboarding flow must be explicit about what `szlctl` will do in the user's AWS
+account before it asks for confirmation.
+
+This matters because the CLI needs AWS credentials that can create infrastructure.
+That can look like arbitrary account access unless the tool clearly states its plan,
+its required permissions, and the resources it will own.
+
+CloudFormation should remain the deployment engine. `szlctl` should not become a
+general-purpose IaC tool or imperatively assemble the production stack through
+ad-hoc SDK calls. Its job is to select versioned artifacts, resolve parameters,
+create a CloudFormation change set, wait for stack completion, and run the small
+post-deploy steps that CloudFormation is not a good fit for, such as model seeding
+and initial API key creation.
+
+`szlctl up aws` should print a plan before changing anything:
+
+```text
+Account: 123456789012
+Region: us-east-2
+Stack: scale-zero-llm-dev
+
+szlctl will create or update:
+  - CloudFormation stacks for the control plane and GPU runtime AMI
+  - Lambda functions and a Lambda Function URL
+  - DynamoDB tables for models, instances, and API keys
+  - IAM roles/policies scoped to the stack
+  - S3 bucket for model artifacts
+  - CodeBuild project for model sync
+  - EC2 Image Builder pipeline and runtime AMI
+  - EC2 security group for GPU inference
+  - EventBridge health-check schedule
+  - CloudWatch log groups
+
+szlctl may launch GPU EC2 instances when inference requests arrive.
+szlctl destroy --yes removes the stack-managed resources.
+```
+
+The CLI should also make these boundaries clear:
+
+- it should not create users, access keys, organizations, or account-wide identity
+  resources
+- it should not inspect unrelated buckets, tables, instances, secrets, or logs
+- it should tag all owned resources so they are auditable
+- it should support `--dry-run` or `plan` output before apply
+- it should document the minimum IAM policy needed for deployment
+- it should provide a CloudFormation template for a dedicated deploy role that
+  cautious users can inspect and create before running the CLI
+- it should rely on the standard AWS credentials chain, so cautious users can point
+  `szlctl` at a profile that already assumes the deploy role:
+  `szlctl up aws --profile scale-zero-llm-deployer`
+- it should support an operator-supplied permissions boundary where possible
+- it should make preserved resources explicit, especially model S3 objects and AMIs
+
+The CLI probably cannot avoid needing broad deploy-time permissions for the first
+AWS version, but it can reduce concern by being transparent, deterministic, tagged,
+and easy to tear down.
+
+There should be two supported trust paths:
+
+- convenience path: use the caller's current AWS credentials, print the plan, and
+  deploy the versioned CloudFormation stack after confirmation
+- cautious path: deploy or manually create a constrained `scale-zero-llm-deployer`
+  IAM role from an auditable template, configure a normal AWS profile that assumes
+  that role, then run `szlctl` with `--profile`
+
+An explicit `--role-arn` flag could be added later for CI or one-off automation, but
+the default local trust model should let the AWS SDK credential chain handle role
+assumption rather than asking users to trust the CLI to switch roles correctly.
+
 ## CI Bootstrap Smoke Test
 
 The repository should eventually run a real AWS bootstrap test that proves the

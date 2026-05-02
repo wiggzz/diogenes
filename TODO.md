@@ -158,6 +158,12 @@ instead of leaving them only in chat history or local notes.
 
 ## UX / Client Experience
 
+- **Set up release-please for `szlctl` releases and installer artifacts**. The Rust
+  CLI should have automated version bumps, changelogs, tags, GitHub Releases, and
+  published binaries/install scripts. Each release should also publish matching AWS
+  deploy artifacts (templates, Lambda packages, model manifest, checksums) so
+  `szlctl up aws --version <x>` deploys a coherent artifact set.
+
 - **Make first deploy possible without cloning the repo**. SAM-template-only deploy
   likely is not enough now because bootstrap needs CLI orchestration: discover or
   create AWS network defaults, build/select the GPU AMI, deploy/update stacks, seed
@@ -190,6 +196,15 @@ instead of leaving them only in chat history or local notes.
 ---
 
 ## Observability / Operations
+
+- **Document and enforce the `szlctl` AWS trust boundary**. Before `szlctl up aws`
+  mutates an account, it should print a concrete plan of resources it will create,
+  the account/region/stack it will target, the fact that GPU EC2 instances may launch
+  on inference, and what `szlctl destroy` will remove or preserve. Publish a minimal
+  IAM policy and a CloudFormation template for a dedicated deploy role, support
+  normal AWS credential-chain/profile usage for deploying through that role, tag all
+  owned resources, avoid reading unrelated account resources, and support dry-run/plan
+  output plus operator-supplied permissions boundaries where possible.
 
 - **Capture inference performance metrics outside raw logs**. Today throughput is
   only available by scraping llama-server timing lines from CloudWatch Logs, which is

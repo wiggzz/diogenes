@@ -91,6 +91,14 @@ async function startingInstance(model) {
   return instanceByStatus(model, "starting");
 }
 
+async function stoppedInstance(model) {
+  return instanceByStatus(model, "stopped");
+}
+
+async function stoppingInstance(model) {
+  return instanceByStatus(model, "stopping");
+}
+
 async function instanceByStatus(model, status) {
   const result = await dynamodb.send(
     new QueryCommand({
@@ -114,6 +122,9 @@ async function instanceByStatus(model, status) {
   return {
     instanceId: item.instance_id.S,
     ip: item.ip?.S || "",
+    previousIp: item.previous_ip?.S || "",
+    stoppedAt: item.stopped_at?.N || "",
+    warmExpiresAt: item.warm_expires_at?.N || "",
   };
 }
 
@@ -237,6 +248,19 @@ async function routableInstance(model) {
   return null;
 }
 
+async function warmStartPending(model) {
+  const starting = await startingInstance(model);
+  if (starting?.previousIp || starting?.stoppedAt || starting?.warmExpiresAt) {
+    return true;
+  }
+
+  if (await stoppedInstance(model)) {
+    return true;
+  }
+
+  return Boolean(await stoppingInstance(model));
+}
+
 async function proxyStreaming(event, stream, path) {
   const bodyText = event.isBase64Encoded
     ? Buffer.from(event.body || "", "base64").toString("utf8")
@@ -253,17 +277,20 @@ async function proxyStreaming(event, stream, path) {
 
   const instance = await routableInstance(model);
   if (!instance) {
+    const isWarmStart = await warmStartPending(model);
     await triggerScaleUp(model);
     writeJson(
       stream,
       503,
       {
         error: {
-          message: "Model is cold-starting. Retry shortly.",
+          message: isWarmStart
+            ? "Model is warm-starting. Retry shortly."
+            : "Model is cold-starting. Retry shortly.",
           type: "service_unavailable",
         },
       },
-      { "Retry-After": "10" }
+      { "Retry-After": "30" }
     );
     return;
   }
